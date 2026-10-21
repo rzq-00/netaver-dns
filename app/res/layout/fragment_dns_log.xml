@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="DNS Log"
+        android:textColor="@color/text"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <RadioGroup
+        android:id="@+id/dns_filter_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingBottom="4dp">
+        <RadioButton android:id="@+id/f_all" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_all" android:textColor="@color/text" android:checked="true" />
+        <RadioButton android:id="@+id/f_blocked" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_blocked" android:textColor="@color/text" />
+        <RadioButton android:id="@+id/f_allowed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_allowed" android:textColor="@color/text" />
+        <RadioButton android:id="@+id/f_bypass" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_bypass" android:textColor="@color/text" />
+    </RadioGroup>
+
+    <EditText
+        android:id="@+id/dns_search"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Cari domain, IP, aplikasi…"
+        android:textColor="@color/text"
+        android:textColorHint="@color/faint"
+        android:singleLine="true"
+        android:paddingBottom="8dp" />
+
+    <ListView
+        android:id="@+id/dns_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@color/border"
+        android:dividerHeight="1dp" />
+
+    <TextView
+        android:id="@+id/dns_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="@string/empty_log"
+        android:textColor="@color/faint"
+        android:visibility="gone" />
+</LinearLayout>

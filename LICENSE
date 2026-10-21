@@ -1,0 +1,14 @@
+SOURCE-AVAILABLE — ALL RIGHTS RESERVED
+
+Copyright (c) 2026 rzq-00. All rights reserved.
+
+This source code is published for TRANSPARENCY and security review only:
+anyone may read and audit it to verify what the NetAver DNS app does.
+
+No license is granted to copy, modify, redistribute, or reuse this code
+(in whole or in part), or to use it in other projects, without prior
+written permission from the copyright holder.
+
+The NetAver DNS application itself is distributed by its author as a
+ready-to-install APK; this repository exists so that its inner workings
+can be inspected — not as an open-source release.

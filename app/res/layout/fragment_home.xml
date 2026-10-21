@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="12dp">
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="34dp"
+                android:src="@drawable/logo_netaver"
+                android:contentDescription="NetAver DNS logo" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="10dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/home_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/protected_off"
+                    android:textColor="@color/muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingTop="18dp"
+            android:paddingBottom="10dp">
+
+            <ImageButton
+                android:id="@+id/power_button"
+                android:layout_width="110dp"
+                android:layout_height="110dp"
+                android:background="@drawable/power_bg"
+                android:src="@drawable/ic_power"
+                android:scaleType="centerInside"
+                android:padding="30dp"
+                android:contentDescription="power" />
+
+            <TextView
+                android:id="@+id/latency_live"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text=""
+                android:textColor="@color/green"
+                android:textSize="12sp" />
+
+            <ProgressBar
+                android:id="@+id/check_spinner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/power_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/tap_to_start"
+                android:textColor="@color/text"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/uptime_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="5dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_queries" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/stat_queries" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/text" android:textSize="20sp" android:textStyle="bold" />
+                </LinearLayout>
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="5dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_blocked" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/stat_blocked" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/red" android:textSize="20sp" android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="5dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_rate" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/stat_rate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0%" android:textColor="@color/accent" android:textSize="20sp" android:textStyle="bold" />
+                </LinearLayout>
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="5dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_upstream" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/stat_upstream" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1.1.1.1" android:textColor="@color/text" android:textSize="16sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/stat_latency" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="@color/green" android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout style="@style/Card" android:layout_marginTop="10dp" android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS UPSTREAM" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="6dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mode" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="4dp" />
+            <RadioGroup
+                android:id="@+id/mode_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <RadioButton android:id="@+id/mode_parallel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Paralel" android:textColor="@color/text" android:checked="true" />
+                <RadioButton android:id="@+id/mode_fastest" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tercepat" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/mode_sequential" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Berurutan" android:textColor="@color/text" />
+            </RadioGroup>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Paralel: semua ditanya sekaligus, jawaban tercepat menang. Tercepat: pakai upstream dengan latency terendah. Berurutan: coba satu-satu sesuai urutan daftar." android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="2dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Daftar upstream (maks 5)" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
+            <LinearLayout
+                android:id="@+id/upstream_list_box"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tambah upstream" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
+            <RadioGroup
+                android:id="@+id/add_preset_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <RadioButton android:id="@+id/add_cf" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Cloudflare (1.1.1.1)" android:textColor="@color/text" android:checked="true" />
+                <RadioButton android:id="@+id/add_google" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Google (8.8.8.8)" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/add_quad9" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quad9 (9.9.9.9)" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/add_custom" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Custom…" android:textColor="@color/text" />
+            </RadioGroup>
+            <LinearLayout
+                android:id="@+id/add_custom_box"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:paddingTop="6dp">
+                <EditText
+                    android:id="@+id/add_custom_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="tls://dns.example.com or https://dns.example.com/dns-query"
+                    android:textColor="@color/text"
+                    android:textColorHint="@color/faint"
+                    android:inputType="text"
+                    android:singleLine="true" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Formats: tls://host (DoT), https://host/path (DoH), IP, or hostname"
+                    android:textColor="@color/faint"
+                    android:textSize="11sp"
+                    android:paddingTop="2dp" />
+            </LinearLayout>
+            <Button
+                android:id="@+id/add_upstream_btn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tambah"
+                android:layout_marginTop="6dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_protocol" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="6dp" />
+            <RadioGroup
+                android:id="@+id/protocol_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <RadioButton android:id="@+id/proto_dot" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DoT" android:textColor="@color/text" android:checked="true" />
+                <RadioButton android:id="@+id/proto_doh" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DoH" android:textColor="@color/text" />
+            </RadioGroup>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/protocol_hint" android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="6dp" />
+            <TextView
+                android:id="@+id/upstream_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/text"
+                android:textSize="12sp"
+                android:paddingTop="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

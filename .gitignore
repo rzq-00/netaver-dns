@@ -1,0 +1,12 @@
+# Signing keys — NEVER commit a keystore
+*.keystore
+*.jks
+
+# Build output
+out/
+*.apk
+
+# Local / editor
+.DS_Store
+*.log
+.idea/

@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/tab_settings"
+            android:textColor="@color/text"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Battery &amp; Performance"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout android:id="@+id/set_battery" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/battery_saver" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_battery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/battery_saver_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_boot" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/start_on_boot" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_boot" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/start_on_boot_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Protection"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout android:id="@+id/set_firewall" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/firewall" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_firewall" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/firewall_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_bypass" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/block_bypass" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_bypass" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/block_bypass_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_bypass_lan" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bypass LAN" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_bypass_lan" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Trafik lokal (192.168.x.x, 10.x.x.x) diteruskan langsung tanpa filter — untuk web router, printer, NAS" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="General"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout android:id="@+id/set_notif" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/show_notification" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_notif" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/show_notification_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_geoip" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/geoip" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_geoip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/geoip_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_dnscache" style="@style/Card">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/dns_cache" android:textColor="@color/text" android:textStyle="bold" />
+            <Switch android:id="@+id/sw_dnscache" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/dns_cache_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/logs_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Logs"
+            android:clickable="true"
+            android:focusable="true"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout
+            android:id="@+id/logs_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <LinearLayout android:id="@+id/set_clear_logs" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_clear_logs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/clear_logs"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/clear_logs_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_export_logs" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_export_logs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/export_logs"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/export_logs_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+        <TextView
+            android:id="@+id/log_size_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ukuran log: —"
+            android:textColor="@color/muted"
+            android:textSize="12sp"
+            android:paddingStart="4dp"
+            android:paddingBottom="8dp" />
+
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/set_debug" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_debug"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Start debug capture"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Rekam semua query &amp; koneksi untuk analisa, lalu bagikan hasilnya" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/backup_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Backup"
+            android:clickable="true"
+            android:focusable="true"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout
+            android:id="@+id/backup_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <LinearLayout android:id="@+id/set_export_settings" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_export_settings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/export_settings"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/export_settings_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <LinearLayout android:id="@+id/set_import_settings" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_import_settings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/import_settings"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/import_settings_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Split tunnel"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp" />
+
+        <LinearLayout android:id="@+id/set_split_tunnel" style="@style/Card" android:orientation="vertical">
+            <Button
+                android:id="@+id/btn_split_tunnel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/split_tunnel"
+                android:textColor="@color/text" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/split_tunnel_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingStart="4dp" android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/version_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="@color/faint"
+            android:textSize="11sp"
+            android:gravity="center"
+            android:paddingTop="16dp" />
+    </LinearLayout>
+</ScrollView>

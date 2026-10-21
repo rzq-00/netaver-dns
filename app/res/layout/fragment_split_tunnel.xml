@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Split tunnel"
+        android:textColor="@color/text"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:paddingBottom="4dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/split_tunnel_desc"
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:paddingBottom="8dp" />
+
+    <EditText
+        android:id="@+id/split_search"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Cari aplikasi…"
+        android:textColor="@color/text"
+        android:textColorHint="@color/faint"
+        android:singleLine="true"
+        android:paddingBottom="8dp" />
+
+    <CheckBox
+        android:id="@+id/split_show_system"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tampilkan aplikasi sistem"
+        android:textColor="@color/muted"
+        android:textSize="13sp"
+        android:paddingBottom="8dp" />
+
+    <ListView
+        android:id="@+id/split_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@color/border"
+        android:dividerHeight="1dp" />
+
+    <LinearLayout
+        android:id="@+id/split_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/split_bar_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/text"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/split_btn_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Batal" />
+
+        <Button
+            android:id="@+id/split_btn_apply"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Terapkan" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/tab_lists"
+        android:textColor="@color/text"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/lists_summary"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Blocklists"
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:paddingBottom="8dp" />
+
+    <ListView
+        android:id="@+id/lists_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@color/border"
+        android:dividerHeight="1dp" />
+
+    <Button
+        android:id="@+id/add_list_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="@string/add_custom_list" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/custom_list_hint"
+        android:textColor="@color/faint"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:paddingTop="6dp" />
+
+    <Button
+        android:id="@+id/update_lists_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="@string/update_lists" />
+
+    <Button
+        android:id="@+id/custom_rules_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="@string/custom_rules" />
+</LinearLayout>

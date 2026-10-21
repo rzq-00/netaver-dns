@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/tab_apps"
+        android:textColor="@color/text"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Per-app network activity"
+        android:textColor="@color/muted"
+        android:textSize="12sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tap app for detail · switch ON = internet allowed · 🔴 blocked · 🟢 allowed"
+        android:textColor="@color/faint"
+        android:textSize="11sp"
+        android:paddingBottom="8dp" />
+
+    <CheckBox
+        android:id="@+id/apps_show_system"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tampilkan aplikasi sistem"
+        android:textColor="@color/muted"
+        android:textSize="13sp"
+        android:paddingBottom="8dp" />
+
+    <ListView
+        android:id="@+id/apps_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@color/border"
+        android:dividerHeight="1dp" />
+
+    <TextView
+        android:id="@+id/apps_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="@string/empty_apps"
+        android:textColor="@color/faint"
+        android:visibility="gone" />
+</LinearLayout>
