@@ -1,0 +1,3 @@
+The screenshots in this folder are UI MOCKUPS rendered from HTML with
+fictional example data (domains, statistics and app names are illustrative).
+They mirror the real app's interface without exposing any real usage data.
