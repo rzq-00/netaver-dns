@@ -37,6 +37,19 @@ need to build it yourself.
 - **100% on-device**: no account, no analytics, no data leaves the phone except
   the DNS queries themselves — sent encrypted to the upstream you picked
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/home.png" width="160" alt="Home — protection status and statistics">
+  <img src="screenshots/dns-log.png" width="160" alt="DNS Log — allowed and blocked queries">
+  <img src="screenshots/apps.png" width="160" alt="Apps — per-app traffic and firewall">
+  <img src="screenshots/lists.png" width="160" alt="Lists — blocklist management">
+  <img src="screenshots/settings.png" width="160" alt="Settings">
+</p>
+
+*Interface mockups rendered with fictional example data — they mirror the real
+UI without exposing any real usage data.*
+
 ## Requirements
 
 - Android 10 (API 29) or newer
