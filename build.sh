@@ -1,38 +1,21 @@
 #!/usr/bin/env bash
-# Manual APK build for NetAver DNS (no Gradle): aapt2 + kotlinc + d8 + apksigner
-#
-# Toolchain (override via environment):
-#   JDK_HOME      default ~/jdk17
-#   KOTLINC_HOME  default ~/kotlin/kotlinc
-#   SDK_HOME      default ~/android-sdk   (platform android-34, build-tools 34.0.0)
-# Signing:
-#   Uses ./debug.keystore (git-ignored — create your own, see README).
-#   Set EXPECT_CERT to your keystore's SHA-256 fingerprint to pin it;
-#   leave it empty to skip the pin check (a warning is printed).
+# Manual APK build for NetAver DNS Kotlin rewrite (no Gradle): aapt2 + kotlinc + d8 + apksigner
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP="$ROOT/app"
-OUT="$ROOT/out"
-SRC="$APP/kotlin-src"
-JDK_HOME="${JDK_HOME:-$HOME/jdk17}"
-KOTLINC_HOME="${KOTLINC_HOME:-$HOME/kotlin/kotlinc}"
-SDK_HOME="${SDK_HOME:-$HOME/android-sdk}"
-BT="$SDK_HOME/build-tools/34.0.0"
-AJAR="$SDK_HOME/platforms/android-34/android.jar"
-KOTLINC="$KOTLINC_HOME/bin/kotlinc"
-STDLIB="$KOTLINC_HOME/lib/kotlin-stdlib.jar"
-KS="$ROOT/debug.keystore"
-APKNAME="NetAverDNS-v2.2.12.apk"
-EXPECT_CERT="${EXPECT_CERT:-}"
+APP=~/workspace/netaver-dns-kotlin/app
+OUT=~/workspace/netaver-dns-kotlin/out
+SRC=$APP/kotlin-src
+SDK=~/android-sdk
+BT=$SDK/build-tools/34.0.0
+AJAR=$SDK/platforms/android-34/android.jar
+KOTLINC=~/kotlin/kotlinc/bin/kotlinc
+STDLIB=~/kotlin/kotlinc/lib/kotlin-stdlib.jar
+KS=$APP/../debug.keystore
+APKNAME="NetAverDNS-v2.2.13.apk"
+EXPECT_CERT="57b11da5b0502c7e64f15961999b152e0203c3447ab1342b3008ecccf44e592e"
 
-export JAVA_HOME="$JDK_HOME"
-export PATH="$JAVA_HOME/bin:$PATH"
-
-if [ ! -f "$KS" ]; then
-  echo "Missing $KS — create your own signing keystore first (see README, 'Building from source')."
-  exit 1
-fi
+export JAVA_HOME=~/jdk17
+export PATH=$JAVA_HOME/bin:$PATH
 
 rm -rf "$OUT"
 mkdir -p "$OUT/compiled_res" "$OUT/gen" "$OUT/classes" "$OUT/dex"
@@ -94,8 +77,8 @@ echo "== zipalign =="
 $BT/zipalign -f 4 "$OUT/app-unsigned.apk" "$OUT/app-aligned.apk"
 
 echo "== apksigner =="
-# NOTE: keystore lives OUTSIDE $OUT on purpose:
-# build.sh wipes $OUT every run; a fresh key each build would break install-over.
+# NOTE: keystore lives OUTSIDE $OUT on purpose (same as Java project):
+# build.sh wipes $OUT every run, a fresh key each build would break install-over.
 $BT/apksigner sign --ks "$KS" \
   --ks-pass pass:android --key-pass pass:android \
   --out "$OUT/$APKNAME" "$OUT/app-aligned.apk"
@@ -103,12 +86,9 @@ $BT/apksigner sign --ks "$KS" \
 echo "== verify cert =="
 ACTUAL=$($BT/apksigner verify --print-certs "$OUT/$APKNAME" | grep -i "SHA-256" | head -1 | awk '{print $NF}' | tr 'A-Z' 'a-z')
 echo "cert SHA-256: $ACTUAL"
-if [ -n "$EXPECT_CERT" ] && [ "$ACTUAL" != "$EXPECT_CERT" ]; then
+if [ "$ACTUAL" != "$EXPECT_CERT" ]; then
   echo "CERT MISMATCH! Expected $EXPECT_CERT"
   exit 1
-fi
-if [ -z "$EXPECT_CERT" ]; then
-  echo "(EXPECT_CERT not set — pin check skipped. Set it to lock the build to your key.)"
 fi
 
 ls -la "$OUT/$APKNAME"

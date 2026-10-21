@@ -108,6 +108,11 @@ class DnsVpnService : VpnService() {
         @JvmField
         var upstreamStatusLine = ""
 
+        /** True while the VPN is up. Read by the Quick Settings tile (VpnTileService). */
+        @Volatile
+        @JvmField
+        var vpnActive = false
+
         const val CHANNEL_ID = "sunraku_vpn"
         private const val NOTIF_ID = 1
         const val NOTIF_ID_START = 2
@@ -266,6 +271,8 @@ class DnsVpnService : VpnService() {
         }
 
         running = true
+        vpnActive = true
+        VpnTileService.requestRefresh(this)
         startTime = System.currentTimeMillis()
         tunOut = FileOutputStream(tun!!.fileDescriptor)
         resolver.clear()
@@ -417,6 +424,8 @@ class DnsVpnService : VpnService() {
 
     private fun stopVpn() {
         running = false
+        vpnActive = false
+        VpnTileService.requestRefresh(this)
         unregisterNetworkCallback()
         try {
             val gl = geoListener
