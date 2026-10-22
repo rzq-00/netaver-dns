@@ -30,6 +30,8 @@
             android:id="@+id/item_name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textColor="@color/text"
             android:textSize="13sp"
             android:textStyle="bold" />
@@ -38,6 +40,8 @@
             android:id="@+id/item_sub"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textColor="@color/muted"
             android:textSize="11sp" />
     </LinearLayout>

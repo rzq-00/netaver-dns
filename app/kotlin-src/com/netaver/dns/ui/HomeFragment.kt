@@ -128,7 +128,7 @@ class HomeFragment : Fragment() {
         powerBtn.isEnabled = !c
         checkSpinner.visibility = if (c) View.VISIBLE else View.GONE
         if (c) {
-            powerLabel.text = "Memeriksa koneksi…"
+            powerLabel.setText(R.string.checking_connection)
             latencyTv.text = ""
         } else {
             refresh()
@@ -138,7 +138,7 @@ class HomeFragment : Fragment() {
     private fun refreshUpstreamLabel() {
         val act = activity ?: return
         val app = act.application as NetAverApp
-        statUpstream.text = app.prefs().upstreamLabel()
+        statUpstream.text = app.prefs().upstreamLabel(act)
     }
 
     private fun specLabel(spec: String): String {
@@ -160,7 +160,7 @@ class HomeFragment : Fragment() {
         upstreamListBox.removeAllViews()
         if (specs.isEmpty()) {
             val t = TextView(act)
-            t.text = "(kosong — tambah upstream dulu)"
+            t.setText(R.string.empty_upstreams)
             t.setTextColor(0xFF8B93A7.toInt())
             t.textSize = 13f
             upstreamListBox.addView(t)
@@ -194,14 +194,14 @@ class HomeFragment : Fragment() {
         val app = act.application as NetAverApp
         val specs = app.prefs().upstreamList().toMutableList()
         if (specs.size >= Prefs.MAX_UPSTREAMS) {
-            Toast.makeText(act, "Maksimal ${Prefs.MAX_UPSTREAMS} upstream", Toast.LENGTH_SHORT).show()
+            Toast.makeText(act, getString(R.string.max_upstreams_fmt, Prefs.MAX_UPSTREAMS), Toast.LENGTH_SHORT).show()
             return
         }
         val spec = if (addPresetGroup.checkedRadioButtonId == R.id.add_custom) {
             val raw = addCustomEt.text.toString().trim()
             if (!Prefs.parseCustomUpstream(raw).valid) {
                 Toast.makeText(act,
-                    "Format salah: tls://host, https://host/path, IP atau hostname",
+                    R.string.bad_format_upstream,
                     Toast.LENGTH_LONG).show()
                 return
             }
@@ -212,7 +212,7 @@ class HomeFragment : Fragment() {
             "preset:$w"
         }
         if (specs.contains(spec)) {
-            Toast.makeText(act, "Sudah ada di daftar", Toast.LENGTH_SHORT).show()
+            Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
             return
         }
         specs.add(spec)
@@ -227,7 +227,7 @@ class HomeFragment : Fragment() {
         val app = act.application as NetAverApp
         val specs = app.prefs().upstreamList().toMutableList()
         if (specs.size <= 1) {
-            Toast.makeText(act, "Minimal 1 upstream", Toast.LENGTH_SHORT).show()
+            Toast.makeText(act, R.string.min_one_upstream, Toast.LENGTH_SHORT).show()
             return
         }
         if (idx < 0 || idx >= specs.size) return
@@ -249,7 +249,7 @@ class HomeFragment : Fragment() {
             statusTv.setTextColor(0xFF8B93A7.toInt())
             latencyTv.text = ""
         } else if (offline) {
-            statusTv.text = "OFFLINE — tidak ada internet"
+            statusTv.setText(R.string.offline_no_internet)
             statusTv.setTextColor(0xFFFBBF24.toInt())
             latencyTv.text = "—"
         } else {
@@ -282,7 +282,7 @@ class HomeFragment : Fragment() {
         protocolGroup.check(if (proto == 2) R.id.proto_doh else R.id.proto_dot)
         updatingRadio = false
         rebuildUpstreamList()
-        uptimeTv.text = if (!running) "" else if (offline) "Menunggu koneksi…" else "VPN active"
+        uptimeTv.text = if (!running) "" else if (offline) getString(R.string.waiting_connection) else getString(R.string.vpn_active)
         // failover status (static on the service; empty when VPN is off)
         val st = if (running) DnsVpnService.upstreamStatusLine else ""
         upstreamStatusTv.text = st

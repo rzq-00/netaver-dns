@@ -194,19 +194,22 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
         blocklist.replaceSources(src)
         val now = System.currentTimeMillis()
         prefs.setLastListUpdate(now)
-        prefs.setLastListStatus(statusText(tally, now))
+        prefs.setLastListStatusJson(statusJson(tally, now))
+        prefs.setLastListStatus("")
         notifyChanged()
     }
 
-    /** Visible one-line outcome of the last refresh round (shown in the Lists tab). */
-    private fun statusText(t: Tally, now: Long): String {
-        val hhmm = SimpleDateFormat("HH:mm", Locale.US).format(Date(now))
-        val parts = ArrayList<String>()
-        if (t.updated > 0) parts.add(t.updated.toString() + " diperbarui")
-        if (t.unchanged > 0) parts.add(t.unchanged.toString() + " sudah terbaru")
-        if (t.failed > 0) parts.add(t.failed.toString() + " gagal")
-        val body = if (parts.isEmpty()) "Tidak ada list aktif" else parts.joinToString(" · ")
-        return "$body · cek $hhmm"
+    /** Raw outcome of the last refresh round, stored as data - never as a
+     * finished sentence - so the Lists tab phrases it in the language
+     * active when it is SHOWN. (Storing the finished sentence left
+     * Indonesian text on screen in English mode until the next refresh.) */
+    private fun statusJson(t: Tally, now: Long): String {
+        val o = org.json.JSONObject()
+        o.put("u", t.updated)
+        o.put("n", t.unchanged)
+        o.put("f", t.failed)
+        o.put("ts", now)
+        return o.toString()
     }
 
     // ---- disk cache for downloaded lists (survives restarts/updates) ----

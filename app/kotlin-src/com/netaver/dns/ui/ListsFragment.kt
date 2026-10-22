@@ -55,8 +55,8 @@ class ListsFragment : Fragment() {
         val updBtn: Button = v.findViewById(R.id.update_lists_btn)
         updBtn.setOnClickListener {
             updBtn.isEnabled = false
-            updBtn.text = "Updating…"
-            Toast.makeText(act, "Updating blocklists…", Toast.LENGTH_SHORT).show()
+            updBtn.setText(R.string.updating)
+            Toast.makeText(act, R.string.updating_blocklists, Toast.LENGTH_SHORT).show()
             Thread({
                 mgr.refreshCustomLists()
                 val a = activity ?: return@Thread
@@ -65,7 +65,7 @@ class ListsFragment : Fragment() {
                     updBtn.setText(R.string.update_lists)
                     refreshNow()
                     val total = mgr.blocklist().size()
-                    Toast.makeText(a, "Done: $total rules active", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(a, getString(R.string.update_done_fmt, total), Toast.LENGTH_SHORT).show()
                 }
             }, "bl-update").start()
         }
@@ -108,7 +108,7 @@ class ListsFragment : Fragment() {
                 rulesBtn.text = getString(R.string.custom_rules) +
                     " (" + app.customRules().count() + ")"
                 Toast.makeText(act,
-                    "${counts[0]} block, ${counts[1]} allow rules active",
+                    getString(R.string.rules_active_fmt, counts[0], counts[1]),
                     Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(R.string.cancel, null)
@@ -117,7 +117,7 @@ class ListsFragment : Fragment() {
 
     private fun refreshNow() {
         val rows = ArrayList<Row>()
-        rows.add(Row("Built-in Ads & Trackers", "bundled",
+        rows.add(Row(getString(R.string.builtin_list_name), "bundled",
             prefs.builtinEnabled(), ruleCount("bundled"), true, null))
         for (cl in mgr.customLists()) {
             rows.add(Row(cl.name, cl.url, cl.enabled, ruleCount(cl.url), false,
@@ -125,9 +125,36 @@ class ListsFragment : Fragment() {
         }
         adapter.setRows(rows, mgr, prefs, Runnable { refreshNow() })
         val total = mgr.blocklist().size()
-        val st = prefs.lastListStatus()
-        summary.text = "Blocklists · $total rules active" +
+        val st = statusLine()
+        summary.text = getString(R.string.lists_summary_fmt, total) +
             if (st.isEmpty()) "" else " · $st"
+        fitListHeight()
+    }
+
+    /** Phrase the stored refresh outcome in the CURRENT language. The
+     * stored value is raw JSON (counts + timestamp), never a finished
+     * sentence; a sentence stored by an older build is ignored on
+     * purpose - it kept its original language on screen. */
+    private fun statusLine(): String {
+        val raw = prefs.lastListStatusJson()
+        if (raw.isEmpty()) return ""
+        return try {
+            val o = org.json.JSONObject(raw)
+            val parts = ArrayList<String>()
+            val u = o.optInt("u")
+            val n = o.optInt("n")
+            val f = o.optInt("f")
+            if (u > 0) parts.add(getString(R.string.status_updated_fmt, u))
+            if (n > 0) parts.add(getString(R.string.status_uptodate_fmt, n))
+            if (f > 0) parts.add(getString(R.string.lists_failed_fmt, f))
+            val body = if (parts.isEmpty()) getString(R.string.no_active_lists)
+                else parts.joinToString(" · ")
+            val hhmm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(o.optLong("ts")))
+            body + " · " + getString(R.string.checked_fmt, hhmm)
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     private fun listError(source: String): String? {
@@ -144,10 +171,34 @@ class ListsFragment : Fragment() {
         return 0
     }
 
+    /** Lists fix (issue #1): the list used to stretch and push the buttons
+     * to the bottom. Cap its height at its content height (max ~300dp) so
+     * the action buttons sit right below the lists. */
+    private fun fitListHeight() {
+        val count = adapter.count
+        if (count == 0) {
+            list.layoutParams.height = 0
+            list.requestLayout()
+            return
+        }
+        val probe = adapter.getView(0, null, list)
+        val wSpec = View.MeasureSpec.makeMeasureSpec(
+            resources.displayMetrics.widthPixels, View.MeasureSpec.AT_MOST)
+        val hSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        probe.measure(wSpec, hSpec)
+        val cap = (300 * resources.displayMetrics.density).toInt()
+        var h = probe.measuredHeight * count + list.dividerHeight * (count - 1)
+        if (h > cap) h = cap
+        if (list.layoutParams.height != h) {
+            list.layoutParams.height = h
+        }
+        list.requestLayout()
+    }
+
     private fun showAddDialog() {
         val act = activity!!
         val nameEt = EditText(act)
-        nameEt.hint = "Name, e.g. Hagezi Multi PRO"
+        nameEt.setHint(R.string.list_name_hint)
         nameEt.setTextColor(0xFFF1F5F9.toInt())
         nameEt.setHintTextColor(0xFF5B6478.toInt())
         val urlEt = EditText(act)
@@ -160,13 +211,13 @@ class ListsFragment : Fragment() {
         ll.addView(nameEt)
         ll.addView(urlEt)
         AlertDialog.Builder(act)
-            .setTitle("Add custom blocklist")
+            .setTitle(R.string.add_list_title)
             .setView(ll)
             .setPositiveButton(R.string.add) { _, _ ->
                 var name = nameEt.text.toString().trim()
                 val url = urlEt.text.toString().trim()
                 if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
-                    Toast.makeText(act, "Invalid URL", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(act, R.string.invalid_url, Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 if (name.isEmpty()) name = url
@@ -174,7 +225,7 @@ class ListsFragment : Fragment() {
                 cls.add(BlocklistManager.CustomList(name, url, true))
                 mgr.saveCustomLists(cls)
                 refreshNow()
-                Toast.makeText(act, "Added. Tap Update to download.",
+                Toast.makeText(act, R.string.added_update_hint,
                     Toast.LENGTH_LONG).show()
             }
             .setNegativeButton(R.string.cancel, null)
@@ -219,15 +270,17 @@ class ListsFragment : Fragment() {
             val sub: TextView = row.findViewById(R.id.item_sub)
             val sw: Switch = row.findViewById(R.id.item_switch)
             name.text = r.name
+            val ctx = parent.context
             val status: String
             if (!r.enabled) {
-                status = "Disabled — turn on, then tap Update"
+                status = ctx.getString(R.string.status_disabled)
             } else if (r.error != null) {
-                status = "Update failed (" + r.error + ") — tap Update to retry"
+                status = ctx.getString(R.string.status_failed_fmt, r.error)
             } else if (r.rules == 0 && !r.isBuiltin) {
-                status = "Not downloaded — tap Update"
+                status = ctx.getString(R.string.status_not_downloaded)
             } else {
-                status = r.rules.toString() + " rules" + if (r.isBuiltin) " · bundled" else ""
+                status = if (r.isBuiltin) ctx.getString(R.string.status_rules_bundled_fmt, r.rules)
+                    else ctx.getString(R.string.status_rules_fmt, r.rules)
             }
             sub.text = status
             sw.setOnCheckedChangeListener(null)
@@ -254,9 +307,9 @@ class ListsFragment : Fragment() {
             if (!r.isBuiltin) {
                 row.setOnLongClickListener { v ->
                     AlertDialog.Builder(v.context)
-                        .setTitle("Delete list?")
+                        .setTitle(R.string.delete_list_title)
                         .setMessage(r.name)
-                        .setPositiveButton("Delete") { _, _ ->
+                        .setPositiveButton(R.string.delete) { _, _ ->
                             val cls = mgr.customLists()
                             cls.removeIf { cl -> cl.url == r.source }
                             mgr.saveCustomLists(cls)

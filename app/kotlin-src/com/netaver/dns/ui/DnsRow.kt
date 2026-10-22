@@ -30,10 +30,10 @@ class DnsRow private constructor() {
             val badge: TextView = cv.findViewById(R.id.item_badge)
             val flag = GeoIp.flagFor(e.countryCode)
             domain.text = (if (flag.isEmpty()) "" else "$flag ") + e.domain
-            val lat = if (e.blocked) "local" else "${e.latencyMs}ms"
+            val lat = if (e.blocked) cv.context.getString(R.string.local_latency) else "${e.latencyMs}ms"
             val ipPart = if (e.resolvedIp.isEmpty()) "" else " · ${e.resolvedIp}"
             meta.text = "${e.app} · ${e.qtype} · ${FMT.format(Date(e.time))} · $lat$ipPart"
-            badge.text = if (e.isBypass) "BYPASS" else if (e.blocked) "BLOCKED" else "ALLOWED"
+            badge.text = cv.context.getString(if (e.isBypass) R.string.bypass_badge else if (e.blocked) R.string.blocked else R.string.allowed)
             badge.setTextColor(
                 (if (e.isBypass) 0xFFFBBF24 else if (e.blocked) 0xFFF87171 else 0xFF4ADE80).toInt()
             )

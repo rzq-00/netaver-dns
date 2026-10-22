@@ -14,7 +14,7 @@
             android:id="@+id/detail_back"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="← Apps"
+            android:text="@string/back_apps"
             android:textColor="@color/accent"
             android:background="@android:color/transparent"
             android:paddingStart="0dp" />
@@ -88,7 +88,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Akses internet"
+                        android:text="@string/internet_access"
                         android:textColor="@color/text"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -111,7 +111,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="DNS QUERIES"
+            android:text="@string/dns_queries_label"
             android:textColor="@color/muted"
             android:textSize="11sp"
             android:paddingTop="14dp"
@@ -140,7 +140,7 @@
             android:id="@+id/detail_conn_header"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="CONNECTIONS"
+            android:text="@string/connections_label"
             android:textColor="@color/muted"
             android:textSize="11sp"
             android:paddingTop="14dp"
@@ -157,7 +157,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="Belum ada log untuk app ini"
+            android:text="@string/empty_app_log"
             android:textColor="@color/faint"
             android:paddingTop="24dp"
             android:visibility="gone" />

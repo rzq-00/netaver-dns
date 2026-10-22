@@ -179,7 +179,7 @@ class SplitTunnelFragment : Fragment() {
             bar.visibility = View.GONE
         } else {
             bar.visibility = View.VISIBLE
-            barText.text = "$n perubahan belum diterapkan"
+            barText.text = getString(R.string.changes_not_applied_fmt, n)
         }
     }
 
@@ -199,22 +199,20 @@ class SplitTunnelFragment : Fragment() {
         if (added.isEmpty() && removed.isEmpty()) return
         val msg = StringBuilder()
         if (added.isNotEmpty()) {
-            msg.append("➕ Bypass baru: ")
-            msg.append(added.joinToString(", ") { labelOf(it) })
-            msg.append("\n(koneksi langsung tanpa filter DNS & tanpa tercatat di log)\n")
+            msg.append(getString(R.string.split_added_header,
+                added.joinToString(", ") { labelOf(it) }))
         }
         if (removed.isNotEmpty()) {
             if (msg.isNotEmpty()) msg.append("\n")
-            msg.append("➖ Bypass dicabut: ")
-            msg.append(removed.joinToString(", ") { labelOf(it) })
-            msg.append("\n(kembali lewat VPN — aplikasi yang bermasalah dengan VPN bisa ikut terganggu)\n")
+            msg.append(getString(R.string.split_removed_header,
+                removed.joinToString(", ") { labelOf(it) }))
         }
-        msg.append("\nVPN akan di-restart sekali untuk menerapkan perubahan ini.")
+        msg.append(getString(R.string.split_restart_note))
         AlertDialog.Builder(act)
-            .setTitle("Terapkan perubahan split tunnel?")
+            .setTitle(R.string.split_apply_title)
             .setMessage(msg.toString())
-            .setNegativeButton("Batal", null)
-            .setPositiveButton("Ya, Terapkan") { _, _ ->
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.split_apply_yes) { _, _ ->
                 prefs.setSplitBypassSet(bypassed)
                 saved = bypassed.toMutableSet()
                 updateBar()
@@ -230,10 +228,10 @@ class SplitTunnelFragment : Fragment() {
             val act = activity as? MainActivity ?: return@Runnable
             if (act.isVpnRunning()) {
                 act.restartVpn()
-                Toast.makeText(act, "VPN di-restart — split tunnel aktif",
+                Toast.makeText(act, R.string.split_restarted_toast,
                     Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(act, "Tersimpan — berlaku saat VPN dinyalakan",
+                Toast.makeText(act, R.string.split_saved_toast,
                     Toast.LENGTH_SHORT).show()
             }
         }

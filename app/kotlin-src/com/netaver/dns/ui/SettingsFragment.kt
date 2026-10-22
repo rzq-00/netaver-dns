@@ -27,6 +27,8 @@ import com.netaver.dns.log.Entries
 import com.netaver.dns.util.BackupManager
 import com.netaver.dns.util.DebugCapture
 import com.netaver.dns.util.Prefs
+import com.netaver.dns.util.UpdateChecker
+import com.netaver.dns.util.Updater
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,6 +45,22 @@ class SettingsFragment : Fragment() {
     private val debugHandler = Handler(Looper.getMainLooper())
     private var debugTicker: Runnable? = null
     private var logSizeTv: TextView? = null
+    private var updateStatusTv: TextView? = null
+
+    /** "Update available: vX" line under the current-version row. */
+    private fun refreshUpdateStatus() {
+        val act = activity ?: return
+        val tv = updateStatusTv ?: return
+        val app = act.application as NetAverApp
+        val avail = app.prefs().updateAvailable()
+        if (avail.isNotEmpty() && UpdateChecker.isNewer(avail,
+                Updater(act).installedVersion())) {
+            tv.text = getString(R.string.update_available_fmt, avail)
+            tv.visibility = View.VISIBLE
+        } else {
+            tv.visibility = View.GONE
+        }
+    }
 
     /** Refresh the "Ukuran log: X MB" label under Clear/Export (with row counts as a DB-health diagnostic). */
     private fun updateLogSize() {
@@ -57,15 +75,16 @@ class SettingsFragment : Fragment() {
             val app = act.application as NetAverApp
             val dnsN = app.logStore().dnsCount()
             val connN = app.logStore().connCount()
-            tv.text = "Ukuran log: $size · DNS: $dnsN · Conn: $connN"
+            tv.text = getString(R.string.log_size_fmt, size, dnsN, connN)
         } catch (e: Exception) {
-            tv.text = "Ukuran log: —"
+            tv.setText(R.string.log_size_unknown)
         }
     }
 
     override fun onResume() {
         super.onResume()
         updateLogSize()
+        refreshUpdateStatus()
     }
 
     /** Collapsible settings section: tap the header to show/hide the body. */
@@ -110,6 +129,32 @@ class SettingsFragment : Fragment() {
         }
         bind(v, R.id.sw_dnscache, p.dnsCacheEnabled(), p::setDnsCacheEnabled)
 
+        // language picker (bilingual EN/ID, follows system by default)
+        val langValue: TextView = v.findViewById(R.id.language_value)
+        fun langLabel(): String = when (p.appLanguage()) {
+            "en" -> getString(R.string.language_english)
+            "in" -> getString(R.string.language_indonesian)
+            else -> getString(R.string.language_system)
+        }
+        langValue.text = langLabel()
+        v.findViewById<View>(R.id.set_language).setOnClickListener {
+            val codes = arrayOf("", "en", "in")
+            val labels = arrayOf(
+                getString(R.string.language_system),
+                getString(R.string.language_english),
+                getString(R.string.language_indonesian))
+            val cur = codes.indexOf(p.appLanguage()).coerceAtLeast(0)
+            AlertDialog.Builder(act)
+                .setTitle(R.string.language)
+                .setSingleChoiceItems(labels, cur) { d, which ->
+                    p.setAppLanguage(codes[which])
+                    d.dismiss()
+                    act.recreate()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
         val clear: Button = v.findViewById(R.id.btn_clear_logs)
         clear.setOnClickListener {
             AlertDialog.Builder(act)
@@ -118,7 +163,7 @@ class SettingsFragment : Fragment() {
                 .setPositiveButton(android.R.string.ok) { _, _ ->
                     app.logBus().clear()
                     updateLogSize()
-                    Toast.makeText(act, "Logs cleared", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(act, R.string.logs_cleared, Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
@@ -131,9 +176,9 @@ class SettingsFragment : Fragment() {
         updateLogSize()
 
         setupCollapsible(v, p, R.id.logs_header, R.id.logs_body,
-            p.logsCollapsed(), p::setLogsCollapsed, "Logs")
+            p.logsCollapsed(), p::setLogsCollapsed, getString(R.string.section_logs))
         setupCollapsible(v, p, R.id.backup_header, R.id.backup_body,
-            p.backupCollapsed(), p::setBackupCollapsed, "Backup")
+            p.backupCollapsed(), p::setBackupCollapsed, getString(R.string.section_backup))
 
         setupDebugButton(v, app)
 
@@ -148,6 +193,44 @@ class SettingsFragment : Fragment() {
             startActivityForResult(i, REQ_IMPORT_SETTINGS)
         }
 
+        // ---- updates (GitHub Releases) ----
+        bind(v, R.id.sw_update_auto, p.updateAutoCheck(), p::setUpdateAutoCheck)
+        val curTv: TextView = v.findViewById(R.id.update_current)
+        curTv.text = "v" + Updater(act).installedVersion()
+        updateStatusTv = v.findViewById(R.id.update_status)
+        refreshUpdateStatus()
+        val checkBtn: Button = v.findViewById(R.id.btn_check_update)
+        checkBtn.setOnClickListener {
+            checkBtn.isEnabled = false
+            checkBtn.setText(R.string.checking_short)
+            p.setLastUpdateCheck(System.currentTimeMillis())
+            UpdateChecker.fetch { list, raw ->
+                val a2 = activity ?: return@fetch
+                if (raw != null) p.setCachedReleasesJson(raw)
+                checkBtn.isEnabled = true
+                checkBtn.setText(R.string.check_update)
+                val latest = list?.firstOrNull()
+                if (latest == null) {
+                    Toast.makeText(a2, R.string.update_check_failed,
+                        Toast.LENGTH_SHORT).show()
+                } else if (UpdateChecker.isNewer(latest.version,
+                        Updater(a2).installedVersion())) {
+                    p.setUpdateAvailable(latest.tag)
+                    Updater(a2).showUpdateDialog(latest)
+                } else {
+                    p.setUpdateAvailable("")
+                    Toast.makeText(a2, R.string.update_uptodate,
+                        Toast.LENGTH_SHORT).show()
+                }
+                refreshUpdateStatus()
+            }
+        }
+        v.findViewById<View>(R.id.set_changelog).setOnClickListener {
+            if (activity is MainActivity) {
+                (activity as MainActivity).openChangelog()
+            }
+        }
+
         val split: Button = v.findViewById(R.id.btn_split_tunnel)
         split.setOnClickListener {
             if (activity is MainActivity) {
@@ -160,7 +243,7 @@ class SettingsFragment : Fragment() {
             val ver: TextView = v.findViewById(R.id.version_label)
             val vn = act.packageManager
                 .getPackageInfo(act.packageName, 0).versionName
-            ver.text = "NetAver DNS v$vn · lightweight build"
+            ver.text = getString(R.string.version_fmt, vn)
         } catch (ignored: Exception) {
         }
         return v
@@ -188,7 +271,7 @@ class SettingsFragment : Fragment() {
                 Toast.makeText(act, result, Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(act, "Import failed: ${e.message}",
+            Toast.makeText(act, getString(R.string.import_failed_fmt, e.message),
                 Toast.LENGTH_LONG).show()
         }
     }
@@ -201,7 +284,7 @@ class SettingsFragment : Fragment() {
         try {
             json = BackupManager.export(app)
         } catch (e: Exception) {
-            Toast.makeText(act, "Export failed: ${e.message}",
+            Toast.makeText(act, getString(R.string.export_failed_fmt, e.message),
                 Toast.LENGTH_LONG).show()
             return
         }
@@ -219,14 +302,14 @@ class SettingsFragment : Fragment() {
                 if (out == null) throw Exception("openOutputStream failed")
                 out.write(json.toByteArray(StandardCharsets.UTF_8))
             }
-            Toast.makeText(act, "Saved to Download/$name", Toast.LENGTH_LONG).show()
+            Toast.makeText(act, getString(R.string.saved_to_download_fmt, name), Toast.LENGTH_LONG).show()
             val share = Intent(Intent.ACTION_SEND)
             share.type = "application/json"
             share.putExtra(Intent.EXTRA_STREAM, uri)
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(Intent.createChooser(share, "Share settings"))
+            startActivity(Intent.createChooser(share, getString(R.string.share_settings)))
         } catch (e: Exception) {
-            Toast.makeText(act, "Export failed: ${e.message}",
+            Toast.makeText(act, getString(R.string.export_failed_fmt, e.message),
                 Toast.LENGTH_LONG).show()
         }
     }
@@ -242,7 +325,7 @@ class SettingsFragment : Fragment() {
             } else {
                 dc.start(buildDebugConfig(app))
                 Toast.makeText(activity,
-                    "Debug capture started — reproduce the issue, then tap Stop",
+                    R.string.debug_started,
                     Toast.LENGTH_LONG).show()
             }
             refreshDebugBtn(btn, app)
@@ -261,10 +344,10 @@ class SettingsFragment : Fragment() {
         val dc: DebugCapture = app.debugCapture()
         if (dc.isCapturing()) {
             val secs = (System.currentTimeMillis() - dc.getStartTime()) / 1000
-            btn.text = String.format(Locale.US, "Stop & share debug (%d:%02d)",
+            btn.text = getString(R.string.stop_share_debug_fmt,
                 secs / 60, secs % 60)
         } else {
-            btn.text = "Start debug capture"
+            btn.setText(R.string.debug_capture)
         }
     }
 
@@ -323,14 +406,14 @@ class SettingsFragment : Fragment() {
                 if (out == null) throw Exception("openOutputStream failed")
                 out.write(report.toString(1).toByteArray(StandardCharsets.UTF_8))
             }
-            Toast.makeText(act, "Saved to Download/$name", Toast.LENGTH_LONG).show()
+            Toast.makeText(act, getString(R.string.saved_to_download_fmt, name), Toast.LENGTH_LONG).show()
             val share = Intent(Intent.ACTION_SEND)
             share.type = "application/json"
             share.putExtra(Intent.EXTRA_STREAM, uri)
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(Intent.createChooser(share, "Share debug"))
+            startActivity(Intent.createChooser(share, getString(R.string.share_debug)))
         } catch (e: Exception) {
-            Toast.makeText(act, "Debug export failed: ${e.message}",
+            Toast.makeText(act, getString(R.string.debug_export_failed_fmt, e.message),
                 Toast.LENGTH_LONG).show()
         }
     }
@@ -377,7 +460,7 @@ class SettingsFragment : Fragment() {
                 .append(csv(c.countryCode)).append('\n')
         }
         if (dns.isEmpty()) {
-            Toast.makeText(act, "No logs to export", Toast.LENGTH_SHORT).show()
+            Toast.makeText(act, R.string.no_logs_to_export, Toast.LENGTH_SHORT).show()
             return
         }
         val name = "netaver-dns-log-" +
@@ -394,14 +477,14 @@ class SettingsFragment : Fragment() {
                 if (out == null) throw Exception("openOutputStream failed")
                 out.write(sb.toString().toByteArray(StandardCharsets.UTF_8))
             }
-            Toast.makeText(act, "Saved to Download/$name", Toast.LENGTH_LONG).show()
+            Toast.makeText(act, getString(R.string.saved_to_download_fmt, name), Toast.LENGTH_LONG).show()
             val share = Intent(Intent.ACTION_SEND)
             share.type = "text/csv"
             share.putExtra(Intent.EXTRA_STREAM, uri)
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(Intent.createChooser(share, "Share log"))
+            startActivity(Intent.createChooser(share, getString(R.string.share_log)))
         } catch (e: Exception) {
-            Toast.makeText(act, "Export failed: ${e.message}",
+            Toast.makeText(act, getString(R.string.export_failed_fmt, e.message),
                 Toast.LENGTH_LONG).show()
         }
     }

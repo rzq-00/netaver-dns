@@ -161,9 +161,9 @@ class AppsFragment : Fragment() {
             val fwSwitch: Switch = row.findViewById(R.id.item_fw)
             icon.text = if (s.app.isEmpty()) "?" else s.app.substring(0, 1).uppercase()
             name.text = s.app
-            sub.text = if (s.installedOnly) "Belum ada aktivitas · paket sistem"
-                else "${s.queries} queries · ${s.blocked} blocked · " +
-                    "${s.conns} conns · ${fmtBytes(s.bytesUp + s.bytesDown)}"
+            sub.text = if (s.installedOnly) parent.context.getString(R.string.app_no_activity_system)
+                else parent.context.getString(R.string.app_stats_fmt,
+                    s.queries, s.blocked, s.conns, fmtBytes(s.bytesUp + s.bytesDown))
             val isBlocked = s.uid >= 0 && fw.isBlocked(s.uid)
             val color = if (isBlocked) 0xFFF87171
                 else if (s.blocked > s.queries / 2 && s.queries > 10) 0xFFF87171

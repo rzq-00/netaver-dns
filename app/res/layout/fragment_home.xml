@@ -137,26 +137,27 @@
             </LinearLayout>
         </LinearLayout>
 
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/stats_period" android:textColor="@color/faint" android:textSize="11sp" android:gravity="center" android:paddingTop="8dp" />
         <LinearLayout style="@style/Card" android:layout_marginTop="10dp" android:orientation="vertical">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS UPSTREAM" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="6dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mode" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="4dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_dns" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="6dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="4dp" />
             <RadioGroup
                 android:id="@+id/mode_group"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
-                <RadioButton android:id="@+id/mode_parallel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Paralel" android:textColor="@color/text" android:checked="true" />
-                <RadioButton android:id="@+id/mode_fastest" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tercepat" android:textColor="@color/text" />
-                <RadioButton android:id="@+id/mode_sequential" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Berurutan" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/mode_parallel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_parallel" android:textColor="@color/text" android:checked="true" />
+                <RadioButton android:id="@+id/mode_fastest" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_fastest" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/mode_sequential" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_sequential" android:textColor="@color/text" />
             </RadioGroup>
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Paralel: semua ditanya sekaligus, jawaban tercepat menang. Tercepat: pakai upstream dengan latency terendah. Berurutan: coba satu-satu sesuai urutan daftar." android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="2dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Daftar upstream (maks 5)" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/mode_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="2dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_list_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
             <LinearLayout
                 android:id="@+id/upstream_list_box"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tambah upstream" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/add_upstream_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
             <RadioGroup
                 android:id="@+id/add_preset_group"
                 android:layout_width="match_parent"
@@ -165,7 +166,7 @@
                 <RadioButton android:id="@+id/add_cf" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Cloudflare (1.1.1.1)" android:textColor="@color/text" android:checked="true" />
                 <RadioButton android:id="@+id/add_google" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Google (8.8.8.8)" android:textColor="@color/text" />
                 <RadioButton android:id="@+id/add_quad9" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quad9 (9.9.9.9)" android:textColor="@color/text" />
-                <RadioButton android:id="@+id/add_custom" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Custom…" android:textColor="@color/text" />
+                <RadioButton android:id="@+id/add_custom" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/custom_ellipsis" android:textColor="@color/text" />
             </RadioGroup>
             <LinearLayout
                 android:id="@+id/add_custom_box"
@@ -186,7 +187,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Formats: tls://host (DoT), https://host/path (DoH), IP, or hostname"
+                    android:text="@string/formats_hint"
                     android:textColor="@color/faint"
                     android:textSize="11sp"
                     android:paddingTop="2dp" />
@@ -195,7 +196,7 @@
                 android:id="@+id/add_upstream_btn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Tambah"
+                android:text="@string/add"
                 android:layout_marginTop="6dp" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_protocol" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="6dp" />
             <RadioGroup

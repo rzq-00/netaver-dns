@@ -111,16 +111,15 @@ class AppDetailFragment : Fragment() {
         val uid = stat?.uid ?: -100
         val blocked = uid >= 0 && fw.isBlocked(uid)
 
-        stats.text = if (stat == null) "no activity yet"
-        else "${stat.queries} queries · ${stat.blocked} blocked · ${stat.conns} conns"
+        stats.text = if (stat == null) getString(R.string.no_activity_yet)
+        else getString(R.string.app_stats_short_fmt, stat.queries, stat.blocked, stat.conns)
         dot.setTextColor((if (blocked) 0xFFF87171 else 0xFF4ADE80).toInt())
 
         // Switch ON = internet allowed (intuitive). OFF = blocked by firewall.
         fwSwitch.setOnCheckedChangeListener(null)
         fwSwitch.isChecked = !blocked
         fwSwitch.isEnabled = uid >= 0
-        fwState.text = if (blocked) "Diblokir — app tidak bisa internetan"
-        else "Diizinkan — app bisa internetan"
+        fwState.setText(if (blocked) R.string.fw_blocked_state else R.string.fw_allowed_state)
         fwState.setTextColor((if (blocked) 0xFFF87171 else 0xFF4ADE80).toInt())
         fwSwitch.setOnCheckedChangeListener { _, checked ->
             if (uid < 0) return@setOnCheckedChangeListener

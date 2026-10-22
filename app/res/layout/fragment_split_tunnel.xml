@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Split tunnel"
+        android:text="@string/split_tunnel"
         android:textColor="@color/text"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -27,7 +27,7 @@
         android:id="@+id/split_search"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Cari aplikasi…"
+        android:hint="@string/search_apps_hint"
         android:textColor="@color/text"
         android:textColorHint="@color/faint"
         android:singleLine="true"
@@ -37,7 +37,7 @@
         android:id="@+id/split_show_system"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Tampilkan aplikasi sistem"
+        android:text="@string/show_system_apps"
         android:textColor="@color/muted"
         android:textSize="13sp"
         android:paddingBottom="8dp" />
@@ -71,12 +71,12 @@
             android:id="@+id/split_btn_cancel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Batal" />
+            android:text="@string/cancel" />
 
         <Button
             android:id="@+id/split_btn_apply"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Terapkan" />
+            android:text="@string/apply" />
     </LinearLayout>
 </LinearLayout>

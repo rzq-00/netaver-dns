@@ -3,6 +3,8 @@ package com.netaver.dns.util
 import android.content.Context
 import android.content.SharedPreferences
 
+import com.netaver.dns.R
+
 /** Simple typed preferences. */
 class Prefs(ctx: Context) {
     private val sp: SharedPreferences =
@@ -42,6 +44,7 @@ class Prefs(ctx: Context) {
         const val KEY_LAST_LIST_UPDATE = "last_list_update"
         const val KEY_LAST_LIST_CHECK = "last_list_check"
         const val KEY_LAST_LIST_STATUS = "last_list_status"
+        const val KEY_LAST_LIST_STATUS_JSON = "last_list_status_json"
         const val KEY_FIREWALL_ENABLED = "firewall_enabled"
         const val KEY_FIREWALL_RULES = "firewall_rules" // uid:rule;...
         const val KEY_GEOIP_ENABLED = "geoip_enabled"
@@ -159,6 +162,12 @@ class Prefs(ctx: Context) {
         }
 
         @JvmStatic
+        fun modeNameRes(mode: Int): Int = when (mode) {
+            MODE_FASTEST -> R.string.mode_fastest
+            MODE_SEQUENTIAL -> R.string.mode_sequential
+            else -> R.string.mode_parallel
+        }
+
         fun upstreamName(which: Int): String {
             return when (which) {
                 1 -> "Google"
@@ -241,6 +250,9 @@ class Prefs(ctx: Context) {
         sp.edit().putInt(KEY_UPSTREAM_MODE, m.coerceIn(0, 2)).apply()
     }
 
+    /** String resource for the current mode name (localized display). */
+    fun modeNameRes(): Int = modeNameRes(upstreamMode())
+
     fun upstreamModeName(): String = when (upstreamMode()) {
         MODE_FASTEST -> "Tercepat"
         MODE_SEQUENTIAL -> "Berurutan"
@@ -300,10 +312,11 @@ class Prefs(ctx: Context) {
         return ha == hb
     }
 
-    /** Best-effort upstream summary for UI (no I/O): "3 upstream · Paralel". */
-    fun upstreamLabel(): String {
+    /** Localized upstream summary for UI (no I/O): "3 upstream · Fastest". */
+    fun upstreamLabel(ctx: Context): String {
+        val w = Lang.wrap(ctx)
         val n = upstreamList().size.coerceAtLeast(1)
-        return "$n upstream · ${upstreamModeName()}"
+        return w.getString(R.string.upstream_stat_fmt, n, w.getString(modeNameRes(upstreamMode())))
     }
 
     fun batterySaver(): Boolean = sp.getBoolean(KEY_BATTERY_SAVER, true)
@@ -325,6 +338,40 @@ class Prefs(ctx: Context) {
     fun logsCollapsed(): Boolean = sp.getBoolean("logs_collapsed", false)
     fun setLogsCollapsed(v: Boolean) {
         sp.edit().putBoolean("logs_collapsed", v).apply()
+    }
+
+/** Per-app language override: "" = follow system, "en", "in". */
+    fun appLanguage(): String = sp.getString("app_language", "") ?: ""
+
+    // ---- in-app updates (GitHub Releases) ----
+    fun updateAutoCheck(): Boolean = sp.getBoolean("update_auto_check", true)
+    fun setUpdateAutoCheck(v: Boolean) {
+        sp.edit().putBoolean("update_auto_check", v).apply()
+    }
+
+    fun lastUpdateCheck(): Long = sp.getLong("update_last_check", 0L)
+    fun setLastUpdateCheck(v: Long) {
+        sp.edit().putLong("update_last_check", v).apply()
+    }
+
+    /** Tag (e.g. "v2.3.2") of the newest release known to be newer than installed, "" = none. */
+    fun updateAvailable(): String = sp.getString("update_available", "") ?: ""
+    fun setUpdateAvailable(v: String) {
+        sp.edit().putString("update_available", v).apply()
+    }
+
+    /** Tag we already popped the update dialog for (auto-check prompts once per version). */
+    fun updatePromptedTag(): String = sp.getString("update_prompted_tag", "") ?: ""
+    fun setUpdatePromptedTag(v: String) {
+        sp.edit().putString("update_prompted_tag", v).apply()
+    }
+
+    fun cachedReleasesJson(): String = sp.getString("update_releases_cache", "") ?: ""
+    fun setCachedReleasesJson(v: String) {
+        sp.edit().putString("update_releases_cache", v).apply()
+    }
+    fun setAppLanguage(v: String) {
+        sp.edit().putString("app_language", v).apply()
     }
 
     fun backupCollapsed(): Boolean = sp.getBoolean("backup_collapsed", false)
@@ -434,6 +481,12 @@ class Prefs(ctx: Context) {
     fun lastListStatus(): String = sp.getString(KEY_LAST_LIST_STATUS, "") ?: ""
     fun setLastListStatus(v: String) {
         sp.edit().putString(KEY_LAST_LIST_STATUS, v).apply()
+    }
+
+    /** Raw JSON outcome of the last list refresh (counts + timestamp). */
+    fun lastListStatusJson(): String = sp.getString(KEY_LAST_LIST_STATUS_JSON, "") ?: ""
+    fun setLastListStatusJson(v: String) {
+        sp.edit().putString(KEY_LAST_LIST_STATUS_JSON, v).apply()
     }
 
     fun customListsRaw(): String {

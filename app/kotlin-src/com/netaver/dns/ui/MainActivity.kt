@@ -71,6 +71,40 @@ class MainActivity : Activity() {
             .commit()
     }
 
+    /** Open the changelog screen (from Settings). Back returns. */
+    fun openChangelog() {
+        fragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, ChangelogFragment())
+            .addToBackStack("changelog")
+            .commit()
+    }
+
+    /** Auto update check: at most once a day, prompts once per version. */
+    private fun maybeAutoCheckUpdates() {
+        val p = app().prefs()
+        if (!p.updateAutoCheck()) return
+        val now = System.currentTimeMillis()
+        if (now - p.lastUpdateCheck() < 24 * 3600 * 1000L) return
+        p.setLastUpdateCheck(now)
+        com.netaver.dns.util.UpdateChecker.fetch { list, raw ->
+            if (isFinishing) return@fetch
+            if (raw != null) p.setCachedReleasesJson(raw)
+            val latest = list?.firstOrNull() ?: return@fetch
+            val upd = com.netaver.dns.util.Updater(this)
+            if (com.netaver.dns.util.UpdateChecker.isNewer(latest.version,
+                    upd.installedVersion())) {
+                p.setUpdateAvailable(latest.tag)
+                if (p.updatePromptedTag() != latest.tag &&
+                    fragmentManager.backStackEntryCount == 0) {
+                    p.setUpdatePromptedTag(latest.tag)
+                    upd.showUpdateDialog(latest)
+                }
+            } else {
+                p.setUpdateAvailable("")
+            }
+        }
+    }
+
     /** Open split-tunnel picker (from Settings). Back returns. */
     fun openSplitTunnel() {
         fragmentManager.beginTransaction()
@@ -181,15 +215,19 @@ class MainActivity : Activity() {
 
     private fun showNoInternetDialog(reason: Int) {
         val msg = if (reason == 1)
-            "Tidak ada koneksi internet yang aktif."
+            getString(R.string.no_internet_active)
         else
-            "Server DNS tidak dapat dijangkau dari jaringan ini."
+            getString(R.string.no_internet_dns)
         AlertDialog.Builder(this)
-            .setTitle("Tidak ada koneksi internet")
-            .setMessage(msg + "\n\nTetap jalankan NetAver DNS?")
-            .setPositiveButton("Tetap jalankan") { _, _ -> startVpnFlow() }
-            .setNegativeButton("Batal", null)
+            .setTitle(R.string.no_internet_title)
+            .setMessage(msg + "\n\n" + getString(R.string.no_internet_keep))
+            .setPositiveButton(R.string.keep_running) { _, _ -> startVpnFlow() }
+            .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(com.netaver.dns.util.Lang.wrap(newBase))
     }
 
     fun isVpnRunning(): Boolean {
@@ -210,7 +248,7 @@ class MainActivity : Activity() {
         } else {
             startService(i)
         }
-        Toast.makeText(this, "Starting NetAver DNS…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.starting, Toast.LENGTH_SHORT).show()
         handler.postDelayed({
             val f = fragmentManager.findFragmentById(R.id.fragment_container)
             if (f is HomeFragment) f.refresh()
@@ -222,7 +260,7 @@ class MainActivity : Activity() {
         if (requestCode == REQ_VPN && resultCode == Activity.RESULT_OK) {
             startVpnService()
         } else if (requestCode == REQ_VPN) {
-            Toast.makeText(this, "VPN permission denied", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, R.string.vpn_permission_denied, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -230,6 +268,7 @@ class MainActivity : Activity() {
         super.onResume()
         val f = fragmentManager.findFragmentById(R.id.fragment_container)
         if (f is HomeFragment) f.refresh()
+        maybeAutoCheckUpdates()
     }
 
     fun app(): NetAverApp = application as NetAverApp

@@ -55,7 +55,8 @@ class VpnTileService : TileService() {
         t.state = if (on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         t.label = "NetAver DNS"
         if (Build.VERSION.SDK_INT >= 29) {
-            t.subtitle = if (on) "Aktif" else "Nonaktif"
+            val w = com.netaver.dns.util.Lang.wrap(this)
+            t.subtitle = w.getString(if (on) R.string.tile_active else R.string.tile_inactive)
         }
         t.icon = Icon.createWithResource(this, R.drawable.ic_power)
         t.updateTile()

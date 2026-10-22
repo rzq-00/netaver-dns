@@ -17,14 +17,14 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Per-app network activity"
+        android:text="@string/apps_subtitle"
         android:textColor="@color/muted"
         android:textSize="12sp" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Tap app for detail · switch ON = internet allowed · 🔴 blocked · 🟢 allowed"
+        android:text="@string/apps_hint"
         android:textColor="@color/faint"
         android:textSize="11sp"
         android:paddingBottom="8dp" />
@@ -33,7 +33,7 @@
         android:id="@+id/apps_show_system"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Tampilkan aplikasi sistem"
+        android:text="@string/show_system_apps"
         android:textColor="@color/muted"
         android:textSize="13sp"
         android:paddingBottom="8dp" />

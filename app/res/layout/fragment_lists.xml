@@ -18,7 +18,7 @@
         android:id="@+id/lists_summary"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Blocklists"
+        android:text="@string/blocklists"
         android:textColor="@color/muted"
         android:textSize="12sp"
         android:paddingBottom="8dp" />
@@ -27,7 +27,6 @@
         android:id="@+id/lists_list"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
         android:divider="@color/border"
         android:dividerHeight="1dp" />
 

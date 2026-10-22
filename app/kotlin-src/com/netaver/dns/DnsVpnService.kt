@@ -897,7 +897,9 @@ class DnsVpnService : VpnService() {
 
     private fun updateUpstreamStatus() {
         val p = try { (application as NetAverApp).prefs() } catch (e: Exception) { null }
-        val mode = p?.upstreamModeName() ?: "Paralel"
+        val wctx2 = com.netaver.dns.util.Lang.wrap(this)
+        val mode = p?.let { wctx2.getString(it.modeNameRes()) }
+            ?: wctx2.getString(com.netaver.dns.R.string.mode_parallel)
         val n = p?.upstreamList()?.size ?: 0
         val down = upstreamDown.size
         upstreamStatusLine = if (down > 0) "$mode · $n upstream · $down DOWN"
@@ -1273,7 +1275,7 @@ class DnsVpnService : VpnService() {
 
     /** Current upstream label for UI. */
     fun currentUpstreamLabel(): String {
-        return prefs.upstreamLabel()
+        return prefs.upstreamLabel(this)
     }
 
     // ---------------- notification ----------------
@@ -1293,13 +1295,14 @@ class DnsVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val totals = logBus.totalsAll()
-        var title = getString(R.string.vpn_notification_title)
+        val wctx = com.netaver.dns.util.Lang.wrap(this)
+        var title = wctx.getString(R.string.vpn_notification_title)
         val text: String
         if (networkLost) {
             title += " · offline"
-            text = "Tidak ada koneksi internet — menunggu…"
+            text = wctx.getString(R.string.notif_offline_text)
         } else {
-            text = getString(R.string.vpn_notification_text, totals[1])
+            text = wctx.getString(R.string.vpn_notification_text, totals[1])
         }
         val nb = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
