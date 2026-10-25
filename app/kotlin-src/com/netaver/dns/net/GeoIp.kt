@@ -16,9 +16,10 @@ import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * IP -> country resolver for the "country flag in logs" feature.
- * Battery-friendly: memory + disk cache, single worker thread, one HTTP
- * request per unknown public IP (free ip-api.com endpoint). Private IPs
- * are skipped (no flag).
+ * Battery-friendly: memory + disk cache, single worker thread, one HTTPS
+ * request per unknown public IP (free api.country.is endpoint — the old
+ * ip-api.com free tier refuses HTTPS with a 403, so no flag ever came
+ * back). Private IPs are skipped (no flag).
  */
 class GeoIp(ctx: Context) {
 
@@ -28,7 +29,14 @@ class GeoIp(ctx: Context) {
 
     private val diskFile = File(ctx.cacheDir, "geoip.txt")
     private val mem: MutableMap<String, String> = ConcurrentHashMap()
-    private val queue: BlockingQueue<String> = LinkedBlockingQueue()
+    // E9: the queue is capped (a flood of unknown IPs must not grow it
+    // without bound) and `queued` dedupes IPs already waiting or in flight;
+    // failed lookups are timestamped in `failAt` and retried after a
+    // backoff instead of being cached as "" forever
+    private val queue: BlockingQueue<String> = LinkedBlockingQueue(MAX_PENDING)
+    private val failAt: MutableMap<String, Long> = ConcurrentHashMap()
+    private val queued: MutableSet<String> =
+        java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
     private val listeners = CopyOnWriteArrayList<Listener>()
     @Volatile private var enabled = true
     private var diskCount = 0
@@ -50,20 +58,43 @@ class GeoIp(ctx: Context) {
 
     /** Enqueue async resolution if not cached. */
     fun resolve(ip: String?) {
-        if (!enabled || ip == null || mem.containsKey(ip) || isPrivate(ip)) return
-        queue.offer(ip)
+        if (!enabled || ip == null || isPrivate(ip)) return
+        val cc = mem[ip]
+        if (cc != null) {
+            if (cc.isNotEmpty()) return // resolved for good
+            // E9: an earlier failure only silences retries for the backoff
+            val at = failAt[ip] ?: 0L
+            if (System.currentTimeMillis() - at < FAIL_RETRY_MS) return
+        }
+        if (!queued.add(ip)) return // already waiting or in flight
+        if (!queue.offer(ip)) queued.remove(ip) // queue full: forget it, a later resolve retries
     }
 
     private fun worker() {
         while (true) {
             val ip = try { queue.take() } catch (e: InterruptedException) { return }
-            if (mem.containsKey(ip) || !enabled) continue
-            val cc = lookup(ip)
-            mem[ip] = cc // "" = failed/unknown, cached to avoid retry storms
-            if (cc.isNotEmpty()) appendDisk(ip, cc)
-            for (l in listeners) {
-                try { l.onResolved(ip, cc) } catch (_: Exception) {}
+            var lookedUp = false
+            try {
+                val cur = mem[ip]
+                // skip if resolved meanwhile, disabled, or (E9) a failure
+                // whose backoff has not elapsed yet
+                val freshFail = cur != null && cur.isEmpty() &&
+                        System.currentTimeMillis() - (failAt[ip] ?: 0L) < FAIL_RETRY_MS
+                if (enabled && cur?.isNotEmpty() != true && !freshFail) {
+                    val cc = lookup(ip)
+                    mem[ip] = cc // "" = failed/unknown (E9: retried after the backoff)
+                    if (cc.isEmpty()) failAt[ip] = System.currentTimeMillis()
+                    else failAt.remove(ip)
+                    if (cc.isNotEmpty()) appendDisk(ip, cc)
+                    for (l in listeners) {
+                        try { l.onResolved(ip, cc) } catch (_: Exception) {}
+                    }
+                    lookedUp = true
+                }
+            } finally {
+                queued.remove(ip)
             }
+            if (!lookedUp) continue
             // be gentle with the free tier: max ~40 req/min
             try { Thread.sleep(1500) } catch (e: InterruptedException) { return }
         }
@@ -72,7 +103,10 @@ class GeoIp(ctx: Context) {
     private fun lookup(ip: String): String {
         var c: HttpURLConnection? = null
         try {
-            val url = URL("https://ip-api.com/json/$ip?fields=status,countryCode")
+            // api.country.is answers {"ip":"...","country":"US"} over HTTPS
+            // (404 = no data for this IP). Its FAQ states requests are not
+            // logged; data is MaxMind GeoLite2, refreshed daily.
+            val url = URL("https://api.country.is/$ip")
             c = url.openConnection() as HttpURLConnection
             c.connectTimeout = 8000
             c.readTimeout = 8000
@@ -84,12 +118,14 @@ class GeoIp(ctx: Context) {
                 while (r.readLine().also { line = it } != null) sb.append(line)
             }
             val json = sb.toString()
-            if (!json.contains("\"success\"")) return ""
-            val i = json.indexOf("\"countryCode\"")
+            val i = json.indexOf("\"country\"")
             if (i < 0) return ""
-            val q1 = json.indexOf('"', i + 14)
+            val colon = json.indexOf(':', i)
+            if (colon < 0) return ""
+            val q1 = json.indexOf('"', colon)
+            if (q1 < 0) return ""
             val q2 = json.indexOf('"', q1 + 1)
-            if (q1 < 0 || q2 < 0) return ""
+            if (q2 < 0) return ""
             val cc = json.substring(q1 + 1, q2)
             return if (cc.length == 2) cc else ""
         } catch (e: Exception) {
@@ -138,6 +174,8 @@ class GeoIp(ctx: Context) {
     companion object {
         private const val TAG = "GeoIp"
         private const val DISK_CAP = 5000
+        private const val MAX_PENDING = 512 // E9: cap on queued lookups
+        private const val FAIL_RETRY_MS = 600_000L // E9: 10 min failure backoff
 
         /** Country code -> flag emoji (regional indicators). "" if unknown. */
         @JvmStatic

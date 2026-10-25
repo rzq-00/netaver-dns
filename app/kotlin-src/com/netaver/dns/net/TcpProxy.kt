@@ -58,6 +58,8 @@ class TcpProxy(private val vpn: DnsVpnService) {
         var bytesUp: Long = 0
         var bytesDown: Long = 0
         var finSent: Boolean = false
+        var cliFin: Boolean = false // client half-closed: FIN received+consumed; download stays open
+        var outShutdown: Boolean = false // shutdownOutput() already called on the WAN channel
     }
 
     private val random = Random()
@@ -197,21 +199,26 @@ class TcpProxy(private val vpn: DnsVpnService) {
             val acked = (p.tcpAck() - (t.sndUna.toLong() and 0xFFFFFFFFL)).toInt()
             if (acked > 0 && acked <= t.unackedLen) {
                 // offset-based trim: O(1), no memmove (compaction happens on append)
-                t.unackedOff += acked
-                t.unackedLen -= acked
-                t.sndUna += acked
-                t.retries = 0
-                t.unackedTime = System.currentTimeMillis()
-                // resume socket reads if we paused them for download backpressure
-                if (t.readPaused && t.unackedLen < MAX_UNACKED) {
-                    t.readPaused = false
-                    try {
-                        val sk = t.ch.keyFor(selector)
-                        if (sk != null && sk.isValid) {
-                            sk.interestOps(sk.interestOps() or SelectionKey.OP_READ)
-                            selector.wakeup()
-                        }
-                    } catch (_: Exception) { }
+                // B7: under the Tcb lock — housekeeping's retransmit
+                // snapshots the (off, len, bytes) window under the same
+                // lock, so it can never observe the triple mid-trim.
+                synchronized(t) {
+                    t.unackedOff += acked
+                    t.unackedLen -= acked
+                    t.sndUna += acked
+                    t.retries = 0
+                    t.unackedTime = System.currentTimeMillis()
+                    // resume socket reads if we paused them for download backpressure
+                    if (t.readPaused && t.unackedLen < MAX_UNACKED) {
+                        t.readPaused = false
+                        try {
+                            val sk = t.ch.keyFor(selector)
+                            if (sk != null && sk.isValid) {
+                                sk.interestOps(sk.interestOps() or SelectionKey.OP_READ)
+                                selector.wakeup()
+                            }
+                        } catch (_: Exception) { }
+                    }
                 }
             }
         }
@@ -291,9 +298,33 @@ class TcpProxy(private val vpn: DnsVpnService) {
         }
 
         if ((flags and IpPacket.FIN) != 0) {
-            t.rcvNxt++ // consume FIN
-            // ACK the FIN and send our FIN
-            sendFin(t)
+            // Half-close (v2.3.7 vc84): the client will send no more data, but
+            // it is still reading — the server may not have sent its response
+            // yet. Consume + ACK the FIN only; do NOT send our FIN and do NOT
+            // change state, so onSocketRead keeps relaying the download. The
+            // upload side of the WAN socket is shut once the write queue has
+            // drained (maybeShutdownOutput); our FIN goes out when the server
+            // closes (onSocketRead EOF -> sendFin).
+            // E10: consume only at the FIN's exact sequence position — the
+            // payload block above already advanced rcvNxt for in-order
+            // payload in this same packet, so an in-order FIN (incl.
+            // data+FIN) satisfies tcpSeq()+payloadLen == rcvNxt. A FIN
+            // across a sequence gap, or a retransmit of the consumed FIN
+            // (position rcvNxt-1), gets a plain dup-ACK instead: no consume,
+            // no shutdown. (maybeShutdownOutput is idempotent and the
+            // onSocketWrite drain hook covers a still-queued upload, so a
+            // retransmitted FIN never needs to re-run it.)
+            val finPos = (p.tcpSeq() + payloadLen) and 0xFFFFFFFFL
+            if (!t.cliFin && finPos == (t.rcvNxt.toLong() and 0xFFFFFFFFL)) {
+                t.cliFin = true
+                t.rcvNxt++ // consume FIN
+                sendTcpW(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
+                        t.sndNxt.toLong(), t.rcvNxt.toLong(), IpPacket.ACK, null, 0, 0, advWindow(t))
+                maybeShutdownOutput(t)
+            } else {
+                sendTcpW(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
+                        t.sndNxt.toLong(), t.rcvNxt.toLong(), IpPacket.ACK, null, 0, 0, advWindow(t))
+            }
         }
     }
 
@@ -426,6 +457,12 @@ class TcpProxy(private val vpn: DnsVpnService) {
             }
             if (t.writeQueue.isEmpty()) {
                 k.interestOps(k.interestOps() and SelectionKey.OP_WRITE.inv())
+                // half-close: uploads fully drained after the client's FIN ->
+                // signal end-of-upload to the server now
+                if (t.cliFin && !t.outShutdown) {
+                    t.outShutdown = true
+                    try { t.ch.shutdownOutput() } catch (_: Exception) {}
+                }
             }
             // re-open the receive window once drained enough
             if (wasThrottled && t.upBuffered < UP_BUF_LOW) {
@@ -474,9 +511,26 @@ class TcpProxy(private val vpn: DnsVpnService) {
         vpn.writeTun(outPkt(), total)
     }
 
+    /**
+     * After a client half-close, shut the WAN socket's output side as soon as
+     * every queued upload byte has been handed to the socket, so the server
+     * sees a proper end-of-request while its response keeps flowing back.
+     * Queue access stays under the Tcb lock, like all writeQueue users.
+     */
+    private fun maybeShutdownOutput(t: Tcb) {
+        if (!t.cliFin || t.outShutdown) return
+        synchronized(t) {
+            if (t.writeQueue.isEmpty() && !t.outShutdown) {
+                t.outShutdown = true
+                try { t.ch.shutdownOutput() } catch (_: Exception) {}
+            }
+        }
+    }
+
     private fun sendFin(t: Tcb) {
         if (t.finSent) return
         t.finSent = true
+        t.outShutdown = true
         try { t.ch.shutdownOutput() } catch (_: Exception) {}
         sendTcp(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
                 t.sndNxt.toLong() and 0xFFFFFFFFL, t.rcvNxt.toLong() and 0xFFFFFFFFL,
@@ -498,13 +552,25 @@ class TcpProxy(private val vpn: DnsVpnService) {
                 }
                 // retransmit unacked (one segment at a time, like real TCP;
                 // never more than fits the packet buffer)
-                val rlen = minOf(t.unackedLen, SEG)
-                val total = IpPacket.buildTcp(outPkt(), t.srvIp, t.cliIp, t.srvPort, t.cliPort,
-                        t.sndUna.toLong() and 0xFFFFFFFFL, t.rcvNxt.toLong() and 0xFFFFFFFFL,
-                        IpPacket.PSH or IpPacket.ACK, 65535, t.unacked, t.unackedOff, rlen)
-                vpn.writeTun(outPkt(), total)
-                t.unackedTime = now
-                t.retries++
+                // B7: snapshot the window under the Tcb lock — the ACK
+                // trim in processTun mutates off/len under the same
+                // lock, so the retransmit never reads a torn window.
+                val seg: ByteArray? = synchronized(t) {
+                    val rlen = minOf(t.unackedLen, SEG)
+                    if (rlen <= 0) null
+                    else {
+                        val copy = t.unacked.copyOfRange(t.unackedOff, t.unackedOff + rlen)
+                        t.unackedTime = now
+                        t.retries++
+                        copy
+                    }
+                }
+                if (seg != null) {
+                    val total = IpPacket.buildTcp(outPkt(), t.srvIp, t.cliIp, t.srvPort, t.cliPort,
+                            t.sndUna.toLong() and 0xFFFFFFFFL, t.rcvNxt.toLong() and 0xFFFFFFFFL,
+                            IpPacket.PSH or IpPacket.ACK, 65535, seg, 0, seg.size)
+                    vpn.writeTun(outPkt(), total)
+                }
             }
             if (t.state == S_LAST_ACK && now - t.finTime > 5000) {
                 closeTcb(t, true)

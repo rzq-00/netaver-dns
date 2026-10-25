@@ -95,16 +95,28 @@ class TcpDns(private val svc: DnsVpnService) {
                 send(s, IpPacket.ACK, null, 0, 0)
                 extractMessages(s)
             }
-        } else if (flags and IpPacket.ACK != 0) {
-            // pure ACK: just refresh
+        } else if (flags and IpPacket.ACK != 0 && flags and IpPacket.FIN == 0) {
+            // pure ACK: just refresh (FIN packets are handled below; E10:
+            // this branch must not move theirAck first, or a FIN arriving
+            // across a sequence gap would look in-order to the FIN check)
             s.theirAck = (p.tcpSeq().toLong() + payloadLen) and 0xFFFFFFFFL
         }
         if (flags and IpPacket.FIN != 0) {
-            s.theirAck = (p.tcpSeq().toLong() + payloadLen + 1) and 0xFFFFFFFFL
-            send(s, IpPacket.ACK, null, 0, 0)
-            send(s, IpPacket.FIN or IpPacket.ACK, null, 0, 0)
-            s.mySeq = (s.mySeq + 1) and 0xFFFFFFFFL // FIN consumes one
-            sessions.remove(k)
+            // E10: consume the FIN only at its exact sequence position (the
+            // payload block above already advanced theirAck for in-order
+            // data in this same packet). A FIN across a gap is ACKed with
+            // the current theirAck and the session stays open for the
+            // missing data instead of being torn down misaligned.
+            val finPos = (p.tcpSeq().toLong() + payloadLen) and 0xFFFFFFFFL
+            if (finPos == s.theirAck) {
+                s.theirAck = (finPos + 1) and 0xFFFFFFFFL
+                send(s, IpPacket.ACK, null, 0, 0)
+                send(s, IpPacket.FIN or IpPacket.ACK, null, 0, 0)
+                s.mySeq = (s.mySeq + 1) and 0xFFFFFFFFL // FIN consumes one
+                sessions.remove(k)
+            } else {
+                send(s, IpPacket.ACK, null, 0, 0)
+            }
         }
     }
 
@@ -114,7 +126,8 @@ class TcpDns(private val svc: DnsVpnService) {
             val b = s.buf.toByteArray()
             if (b.size < 2) return
             val msgLen = ((b[0].toInt() and 0xFF) shl 8) or (b[1].toInt() and 0xFF)
-            if (msgLen <= 0 || msgLen > 4096) {
+            // M3: DNS-over-TCP messages may legally reach 65535 B (RFC max)
+            if (msgLen <= 0 || msgLen > 65535) {
                 // garbage: reset connection
                 send(s, IpPacket.RST or IpPacket.ACK, null, 0, 0)
                 sessions.remove(key(s.srcIp, s.srcPort))
@@ -138,15 +151,25 @@ class TcpDns(private val svc: DnsVpnService) {
      */
     @Synchronized
     fun respond(s: Session, resp: ByteArray?) {
-        if (resp == null || resp.isEmpty() || resp.size > 4096) return
+        if (resp == null || resp.isEmpty() || resp.size > 65535) return
         // verify identity, not just key: a recycled source port could map to a NEW session
         if (sessions[key(s.srcIp, s.srcPort)] !== s) return // gone or replaced
         val framed = ByteArray(2 + resp.size)
         framed[0] = ((resp.size shr 8) and 0xFF).toByte()
         framed[1] = (resp.size and 0xFF).toByte()
         System.arraycopy(resp, 0, framed, 2, resp.size)
-        send(s, IpPacket.PSH or IpPacket.ACK, framed, 0, framed.size)
-        s.mySeq = (s.mySeq + framed.size) and 0xFFFFFFFFL
+        // M3: segment the framed response into <=1460-byte TCP payloads —
+        // a single packet can never cross the TUN (MTU 1500), so large
+        // responses previously vanished; PSH only on the final chunk.
+        var off = 0
+        while (off < framed.size) {
+            val n = minOf(1460, framed.size - off)
+            val flags = if (off + n == framed.size)
+                IpPacket.PSH or IpPacket.ACK else IpPacket.ACK
+            send(s, flags, framed, off, n)
+            s.mySeq = (s.mySeq + n) and 0xFFFFFFFFL
+            off += n
+        }
     }
 
     private fun send(s: Session, flags: Int, payload: ByteArray?, off: Int, len: Int) {
@@ -158,7 +181,13 @@ class TcpDns(private val svc: DnsVpnService) {
 
     private fun sendReset(p: IpPacket) {
         val out = ByteArray(40)
-        val ack = (p.tcpSeq().toLong() + maxOf(p.tcpPayloadLen(), 0) + 1) and 0xFFFFFFFFL
+        // B4: only SYN and FIN consume a sequence number — the old
+        // unconditional +1 made the RST acknowledge one byte the client
+        // never sent for plain data/ACK packets, and strict stacks may
+        // ignore such an RST and keep retransmitting.
+        val flags = p.tcpFlags()
+        val consumes = if (flags and (IpPacket.SYN or IpPacket.FIN) != 0) 1 else 0
+        val ack = (p.tcpSeq().toLong() + maxOf(p.tcpPayloadLen(), 0) + consumes) and 0xFFFFFFFFL
         val total = IpPacket.buildTcp(out, p.dstIp, p.srcIp, 53, p.tcpSrcPort(),
                 0, ack, IpPacket.RST or IpPacket.ACK, 0, null, 0, 0)
         svc.writeTun(out, total)

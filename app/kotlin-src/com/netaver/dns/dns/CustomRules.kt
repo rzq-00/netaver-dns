@@ -90,20 +90,27 @@ class CustomRules {
                 line = line.substring(2).trim()
                 if (line.isEmpty()) return null
             }
-            // strip $modifiers
-            val dollar = line.indexOf('$')
-            if (dollar >= 0) line = line.substring(0, dollar).trim()
-            if (line.isEmpty()) return null
-
-            // regex: /.../
-            if (line.startsWith("/") && line.length > 2 && line.endsWith("/")) {
+            // B5: detect the /regex/ form BEFORE stripping $modifiers —
+            // a '$' inside the pattern (e.g. the anchor in
+            // /example\.com$/) is pattern text, not a modifier
+            // separator; stripping there truncated the rule into an
+            // invalid domain and it vanished silently. The pattern runs
+            // to the LAST '/'; anything after it (e.g. $modifiers) is
+            // dropped, like modifiers on domain rules below.
+            if (line.startsWith("/")) {
+                val close = line.lastIndexOf('/')
+                if (close <= 1) return null // no closing slash / empty pattern
                 return try {
-                    val p = Pattern.compile(line.substring(1, line.length - 1))
+                    val p = Pattern.compile(line.substring(1, close))
                     Rule(allow, null, p)
                 } catch (e: Exception) {
                     null // bad regex: ignore
                 }
             }
+            // strip $modifiers (domain rules)
+            val dollar = line.indexOf('$')
+            if (dollar >= 0) line = line.substring(0, dollar).trim()
+            if (line.isEmpty()) return null
             // ||domain^
             if (line.startsWith("||")) {
                 val end = line.indexOf('^')

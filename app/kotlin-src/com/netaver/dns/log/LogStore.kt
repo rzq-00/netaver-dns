@@ -15,6 +15,7 @@ import android.os.Build
 
 import com.netaver.dns.R
 import com.netaver.dns.ui.MainActivity
+import com.netaver.dns.util.Prefs
 
 import java.io.File
 import java.util.ArrayList
@@ -39,11 +40,13 @@ import java.util.concurrent.TimeUnit
  */
 class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null, VER) {
 
+    private val prefs = Prefs(ctx.applicationContext)
+
     companion object {
         private const val DB = "netaver_logs.db"
         private const val VER = 3
-        private const val CAP_DNS = 3000
-        private const val CAP_CONN = 1500
+        private const val CAP_DNS = 50000
+        private const val CAP_CONN = 25000
         private const val RESTORE_DNS = 1000
         private const val RESTORE_CONN = 500
         private const val FLUSH_MS = 2000L
@@ -55,6 +58,8 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
         private const val WARN_MIN_MS = 24L * 60 * 60 * 1000 // 1 day
         private const val WARN_CHANNEL = "netaver_log_warn"
         private const val WARN_NOTIF_ID = 3
+        /** SharedPreferences file shared with Prefs (warn/clear timestamps). */
+        private const val PREFS_FILE = "sunraku_dns"
 
         private const val OP_DNS = 1
         private const val OP_CONN = 2
@@ -81,6 +86,14 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
     /** Only touched on the io thread. */
     private val pending = ArrayList<Op>()
     private var lastPruneMs = 0L
+
+    // D3: rows timestamped at/below this instant were cleared by the user.
+    // countAll/loadRecent ignore them even if clear()'s async delete has
+    // not landed yet (or the process died first) — no resurrection.
+    @Volatile
+    private var clearedAtMs: Long =
+        appCtx.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            .getLong("logs_cleared_at", 0L)
 
     init {
         io.scheduleWithFixedDelay(
@@ -160,12 +173,12 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
     }
 
     /** Total (queries, blocked) over ALL stored DNS history. BLOCKING — call off the main thread. */
-    fun countAll(): LongArray {
+    fun countAll(beforeMs: Long = Long.MAX_VALUE): LongArray {
         var q = 0L
         var b = 0L
         try {
             val db = readableDatabase
-            db.rawQuery("SELECT COUNT(*), COALESCE(SUM(blocked),0) FROM dns_log", null).use { c ->
+            db.rawQuery("SELECT COUNT(*), COALESCE(SUM(blocked),0) FROM dns_log WHERE time > $clearedAtMs AND time < $beforeMs", null).use { c ->
                 if (c.moveToFirst()) {
                     q = c.getLong(0)
                     b = c.getLong(1)
@@ -185,7 +198,7 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
             val db = readableDatabase
             db.rawQuery(
                 "SELECT time,domain,qtype,app,uid,blocked,latency,ip,country,match,bypass"
-                    + " FROM dns_log ORDER BY _id DESC LIMIT $RESTORE_DNS",
+                    + " FROM dns_log WHERE time > $clearedAtMs ORDER BY _id DESC LIMIT $RESTORE_DNS",
                 null
             ).use { c ->
                 while (c.moveToNext()) {
@@ -202,7 +215,7 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
             dnsOut.reverse()
             db.rawQuery(
                 "SELECT time,app,uid,proto,dest,up,down,dur,blocked,country"
-                    + " FROM conn_log ORDER BY _id DESC LIMIT $RESTORE_CONN",
+                    + " FROM conn_log WHERE time > $clearedAtMs ORDER BY _id DESC LIMIT $RESTORE_CONN",
                 null
             ).use { c ->
                 while (c.moveToNext()) {
@@ -221,6 +234,16 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
 
     /** Flush pending writes, then delete all stored logs. Async. */
     fun clear() {
+        // D3: persist the clear instant FIRST (synchronously, same prefs
+        // file/pattern as log_size_warned_at) so the readers' floor is in
+        // place before the async delete is even queued.
+        // D3 residual: commit(), not apply() — apply() flushes to disk
+        // asynchronously, and a hard kill inside that window lost the
+        // floor and resurrected the cleared rows on the next start.
+        val now = System.currentTimeMillis()
+        clearedAtMs = now
+        appCtx.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            .edit().putLong("logs_cleared_at", now).commit()
         io.execute {
             try {
                 flushLocked()
@@ -234,22 +257,26 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
 
     /** Runs on the io thread only. */
     private fun flushLocked() {
-        if (pending.isEmpty()) return
         try {
             val db = writableDatabase
-            db.beginTransaction()
-            try {
-                for (i in 0 until pending.size) {
-                    val o = pending[i]
-                    if (o.type == OP_DNS) insertDns(db, o.dns!!)
-                    else if (o.type == OP_CONN) insertConn(db, o.conn!!)
-                    else applyCountry(db, o.ip!!, o.cc!!)
+            if (pending.isNotEmpty()) {
+                db.beginTransaction()
+                try {
+                    for (i in 0 until pending.size) {
+                        val o = pending[i]
+                        if (o.type == OP_DNS) insertDns(db, o.dns!!)
+                        else if (o.type == OP_CONN) insertConn(db, o.conn!!)
+                        else applyCountry(db, o.ip!!, o.cc!!)
+                    }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
                 }
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
+                pending.clear()
             }
-            pending.clear()
+            // M8: prune even when nothing was written — otherwise retention
+            // never advances while the VPN is idle. maybePrune self-throttles
+            // to once/minute, so the idle 2s ticks stay cheap.
             maybePrune(db)
         } catch (_: Exception) {
         }
@@ -310,7 +337,8 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
         if (now - lastPruneMs < PRUNE_MIN_MS) return
         lastPruneMs = now
         try {
-            val cutoff = now - RETENTION_MS
+            val retentionMs = prefs.logRetentionDays().toLong() * 24 * 60 * 60 * 1000
+            val cutoff = now - retentionMs
             db.execSQL("DELETE FROM dns_log WHERE time < $cutoff")
             db.execSQL("DELETE FROM conn_log WHERE time < $cutoff")
             db.execSQL(
@@ -331,7 +359,7 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
      * BLOCKING — call off the main thread.
      *
      * @param q lowercase search text; matched against domain/ip/app/match
-     * @param filter 0=all 1=blocked 2=allowed 3=bypass
+     * @param filter 0=all 1=blocked 2=allowed 3=bypass 4=cache
      */
     fun searchDns(q: String, filter: Int, limit: Int): List<Entries.DnsEntry> {
         val out = ArrayList<Entries.DnsEntry>()
@@ -344,8 +372,10 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
                 + " OR LOWER(app) LIKE ? ESCAPE '\'"
                 + " OR LOWER(match) LIKE ? ESCAPE '\'")
             if (filter == 1) where += " AND blocked=1"
-            else if (filter == 2) where += " AND blocked=0"
+            else if (filter == 2) where += " AND blocked=0 AND bypass=0"
             else if (filter == 3) where += " AND bypass=1"
+            else if (filter == 4) where += " AND match LIKE 'Cache%'"
+            where += " AND time > $clearedAtMs"
             val args = arrayOf(like, like, like, like)
             db.rawQuery(
                 "SELECT time,domain,qtype,app,uid,blocked,latency,ip,country,match,bypass"
@@ -395,15 +425,17 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
     private fun checkSizeWarning() {        try {
             val f: File = appCtx.getDatabasePath(DB)
             if (!f.exists() || f.length() < WARN_BYTES) return
-            val sp = appCtx.getSharedPreferences("sunraku_dns", Context.MODE_PRIVATE)
+            val sp = appCtx.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
             val now = System.currentTimeMillis()
             if (now - sp.getLong("log_size_warned_at", 0) < WARN_MIN_MS) return
             sp.edit().putLong("log_size_warned_at", now).apply()
 
             val nm = appCtx.getSystemService(NotificationManager::class.java) ?: return
             if (Build.VERSION.SDK_INT >= 26) {
+                // D6: user-facing strings come from resources (both locales),
+                // never hardcoded literals.
                 nm.createNotificationChannel(NotificationChannel(
-                    WARN_CHANNEL, "Peringatan Log",
+                    WARN_CHANNEL, appCtx.getString(R.string.notif_log_size_channel),
                     NotificationManager.IMPORTANCE_DEFAULT))
             }
             val openIntent = Intent(appCtx, MainActivity::class.java)
@@ -413,8 +445,8 @@ class LogStore(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, DB, null
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val mb = f.length() / (1024 * 1024)
             val nb = Notification.Builder(appCtx, WARN_CHANNEL)
-                .setContentTitle("Log NetAver membesar")
-                .setContentText("Ukuran log ${mb}MB — pertimbangkan Clear log di Pengaturan")
+                .setContentTitle(appCtx.getString(R.string.notif_log_size_title))
+                .setContentText(appCtx.getString(R.string.notif_log_size_body_fmt, mb))
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pi)
                 .setAutoCancel(true)

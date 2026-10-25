@@ -28,7 +28,8 @@ class DnsLogFragment : Fragment() {
     private lateinit var list: ListView
     private lateinit var empty: TextView
     private lateinit var adapter: DnsAdapter
-    private var filter = 0 // 0=all 1=blocked 2=allowed 3=bypass
+    private var filter = 0 // 0=all 1=blocked 2=allowed 3=bypass 4=cache
+    private var chipViews: List<TextView> = emptyList()
     private var query = ""
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var listener: LogBus.Listener
@@ -40,12 +41,32 @@ class DnsLogFragment : Fragment() {
     }
     private var searchSeq = 0
 
+    companion object {
+        private const val ARG_FILTER = "initial_filter"
+        private const val STATE_FILTER = "state_filter"
+
+        /** Open the log with a preset filter (0=all, 1=blocked, ...). */
+        fun newInstance(filter: Int): DnsLogFragment {
+            val f = DnsLogFragment()
+            val b = Bundle()
+            b.putInt(ARG_FILTER, filter)
+            f.arguments = b
+            return f
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
         val v = inflater.inflate(R.layout.fragment_dns_log, container, false)
+        filter = arguments?.getInt(ARG_FILTER, 0) ?: 0
+        // U-N4: a chip the user picked survives rotation; the arguments
+        // preset only seeds a fresh instance
+        if (savedInstanceState != null) {
+            filter = savedInstanceState.getInt(STATE_FILTER, filter)
+        }
         list = v.findViewById(R.id.dns_list)
         empty = v.findViewById(R.id.dns_empty)
         adapter = DnsAdapter()
@@ -56,13 +77,21 @@ class DnsLogFragment : Fragment() {
             DnsDetailDialog.show(act, e)
         }
 
-        val rg: RadioGroup = v.findViewById(R.id.dns_filter_group)
-        rg.setOnCheckedChangeListener { _, checkedId ->
-            filter = if (checkedId == R.id.f_blocked) 1
-                else if (checkedId == R.id.f_allowed) 2
-                else if (checkedId == R.id.f_bypass) 3 else 0
-            refreshNow()
+        // Filter chips (pill bar): one row of five equal-width toggles;
+        // chip order matches the filter values 0..4.
+        val chipIds = intArrayOf(R.id.chip_all, R.id.chip_blocked, R.id.chip_allowed,
+            R.id.chip_bypass, R.id.chip_cache)
+        chipViews = chipIds.map { v.findViewById<TextView>(it) }
+        chipViews.forEachIndexed { idx, tv ->
+            tv.setOnClickListener {
+                if (filter != idx) {
+                    filter = idx
+                    renderChips()
+                    refreshNow()
+                }
+            }
         }
+        renderChips()
 
         val search: EditText = v.findViewById(R.id.dns_search)
         search.addTextChangedListener(object : TextWatcher {
@@ -104,6 +133,29 @@ class DnsLogFragment : Fragment() {
         refreshScheduled = false
     }
 
+    // U-N4: persist the filter chip across rotation (see onCreateView)
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_FILTER, filter)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // U3: shut the search executor down with the fragment — its idle
+        // daemon thread otherwise leaks once per Log tab instance.
+        searchIo.shutdownNow()
+    }
+
+
+    private fun renderChips() {
+        chipViews.forEachIndexed { i, tv ->
+            val on = i == filter
+            tv.setBackgroundResource(if (on) R.drawable.chip_on else R.drawable.chip_off)
+            tv.setTextColor(if (on) 0xFFFFFFFF.toInt() else 0xFF8A94B0.toInt())
+            tv.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+    }
+
     private fun refreshNow() {
         val act = activity ?: return
         val app = act.application as NetAverApp
@@ -124,8 +176,9 @@ class DnsLogFragment : Fragment() {
                         if (fb.size >= 300) break
                         val e = ring[i]
                         if (f == 1 && !e.blocked) continue
-                        if (f == 2 && e.blocked) continue
+                        if (f == 2 && (e.blocked || e.isBypass)) continue // U1: "allowed" excludes bypass rows too
                         if (f == 3 && !e.isBypass) continue
+                        if (f == 4 && !e.fromCache) continue
                         val lc = q.lowercase()
                         if (lc.isNotEmpty()
                             && !e.domain.lowercase().contains(lc)

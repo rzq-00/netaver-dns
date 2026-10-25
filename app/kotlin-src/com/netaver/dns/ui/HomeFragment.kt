@@ -1,27 +1,28 @@
 package com.netaver.dns.ui
 
 import android.app.Fragment
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.RadioGroup
 import android.widget.TextView
-import android.widget.Toast
 
 import com.netaver.dns.DnsVpnService
 import com.netaver.dns.NetAverApp
 import com.netaver.dns.R
-import com.netaver.dns.util.Prefs
+import com.netaver.dns.util.ProviderCatalog
 
-/** Home tab: power button, stats, upstream provider + protocol selector. */
+import java.util.Locale
+
+/** Home tab: power button, stats, and a summary row that opens the Upstream tab. */
 class HomeFragment : Fragment() {
     private lateinit var statusTv: TextView
     private lateinit var powerLabel: TextView
@@ -34,17 +35,10 @@ class HomeFragment : Fragment() {
     private lateinit var statLatency: TextView
     private lateinit var powerBtn: ImageButton
     private lateinit var checkSpinner: ProgressBar
-    private lateinit var modeGroup: RadioGroup
-    private lateinit var protocolGroup: RadioGroup
-    private lateinit var upstreamListBox: LinearLayout
-    private lateinit var addPresetGroup: RadioGroup
-    private lateinit var addCustomBox: View
-    private lateinit var addCustomEt: EditText
-    private lateinit var addBtn: Button
-    private lateinit var upstreamStatusTv: TextView
+    private lateinit var upstreamRow: View
+    private lateinit var upstreamNames: TextView
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var ticker: Runnable
-    private var updatingRadio = false
     private var checking = false
 
     override fun onCreateView(
@@ -64,44 +58,38 @@ class HomeFragment : Fragment() {
         powerBtn = v.findViewById(R.id.power_button)
         latencyTv = v.findViewById(R.id.latency_live)
         checkSpinner = v.findViewById(R.id.check_spinner)
-        modeGroup = v.findViewById(R.id.mode_group)
-        protocolGroup = v.findViewById(R.id.protocol_group)
-        upstreamListBox = v.findViewById(R.id.upstream_list_box)
-        addPresetGroup = v.findViewById(R.id.add_preset_group)
-        addCustomBox = v.findViewById(R.id.add_custom_box)
-        addCustomEt = v.findViewById(R.id.add_custom_text)
-        addBtn = v.findViewById(R.id.add_upstream_btn)
-        upstreamStatusTv = v.findViewById(R.id.upstream_status)
+        upstreamRow = v.findViewById(R.id.home_upstream_row)
+        upstreamNames = v.findViewById(R.id.home_upstream_names)
+
+        // Watermark below the Upstream card (mockup-approved): brand,
+        // italic tagline, and "version" (purple) + versionName (green).
+        val versionTv = v.findViewById<TextView>(R.id.home_version_line)
+        try {
+            val vn = activity!!.packageManager.getPackageInfo(activity!!.packageName, 0).versionName
+            if (vn.isNullOrEmpty()) {
+                versionTv.visibility = View.GONE
+            } else {
+                val full = "version $vn"
+                val span = SpannableString(full)
+                span.setSpan(ForegroundColorSpan(Color.parseColor("#a855f7")), 0, 7, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                span.setSpan(ForegroundColorSpan(Color.parseColor("#22c55e")), 8, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                versionTv.text = span
+            }
+        } catch (e: Exception) {
+            versionTv.visibility = View.GONE
+        }
 
         powerBtn.setOnClickListener { (activity as MainActivity).toggleVpn() }
+        upstreamRow.setOnClickListener { (activity as MainActivity).openUpstream() }
+        v.findViewById<View>(R.id.card_queries).setOnClickListener {
+            (activity as MainActivity).openDnsLog(0)
+        }
+        v.findViewById<View>(R.id.card_blocked).setOnClickListener {
+            (activity as MainActivity).openDnsLog(1)
+        }
 
         val app0 = activity!!.application as NetAverApp
         app0.prefs().migrateUpstreamsIfNeeded()
-
-        modeGroup.setOnCheckedChangeListener { _, checkedId ->
-            if (updatingRadio) return@setOnCheckedChangeListener
-            val app = activity!!.application as NetAverApp
-            val m = if (checkedId == R.id.mode_fastest) Prefs.MODE_FASTEST
-                else if (checkedId == R.id.mode_sequential) Prefs.MODE_SEQUENTIAL
-                else Prefs.MODE_PARALLEL
-            app.prefs().setUpstreamMode(m)
-            refreshUpstreamLabel()
-        }
-
-        addPresetGroup.setOnCheckedChangeListener { _, checkedId ->
-            addCustomBox.visibility =
-                if (checkedId == R.id.add_custom) View.VISIBLE else View.GONE
-        }
-
-        addBtn.setOnClickListener { addUpstreamFromForm() }
-
-        protocolGroup.setOnCheckedChangeListener { _, checkedId ->
-            if (updatingRadio) return@setOnCheckedChangeListener
-            val app = activity!!.application as NetAverApp
-            val proto = if (checkedId == R.id.proto_doh) 2 else 1 // DoT / DoH only
-            app.prefs().setProtocol(proto)
-            refreshUpstreamLabel()
-        }
 
         ticker = Runnable {
             refresh()
@@ -141,100 +129,21 @@ class HomeFragment : Fragment() {
         statUpstream.text = app.prefs().upstreamLabel(act)
     }
 
-    private fun specLabel(spec: String): String {
-        if (spec.startsWith("preset:")) {
-            val w = spec.removePrefix("preset:").toIntOrNull() ?: 0
-            return "${Prefs.upstreamName(w)} (${Prefs.upstreamIp(w)})"
-        }
-        return spec
-    }
-
-    /** Rebuild the upstream rows (label + remove button each). Skipped when unchanged. */
-    private var lastSpecs: List<String>? = null
-    private fun rebuildUpstreamList(force: Boolean = false) {
+    /** Summary row under the stats: provider names + mode, e.g. "Cloudflare, Google · Fastest". */
+    private fun updateUpstreamRow() {
         val act = activity ?: return
         val app = act.application as NetAverApp
-        val specs = app.prefs().upstreamList()
-        if (!force && specs == lastSpecs) return
-        lastSpecs = specs
-        upstreamListBox.removeAllViews()
-        if (specs.isEmpty()) {
-            val t = TextView(act)
-            t.setText(R.string.empty_upstreams)
-            t.setTextColor(0xFF8B93A7.toInt())
-            t.textSize = 13f
-            upstreamListBox.addView(t)
-            return
+        val p = app.prefs()
+        val names = ArrayList<String>()
+        for (spec in p.upstreamList()) {
+            val id = ProviderCatalog.identify(spec, p.getProtocol())
+            val n = if (id.known) id.providerName else getString(R.string.up_custom_name)
+            if (!names.contains(n)) names.add(n)
         }
-        specs.forEachIndexed { idx, spec ->
-            val row = LinearLayout(act)
-            row.orientation = LinearLayout.HORIZONTAL
-            val label = TextView(act)
-            label.text = "${idx + 1}. ${specLabel(spec)}"
-            label.setTextColor(0xFFE8EAF0.toInt())
-            label.textSize = 14f
-            label.layoutParams = LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            val del = Button(act)
-            del.text = "✕"
-            del.setOnClickListener { removeUpstream(idx) }
-            row.addView(label)
-            row.addView(del)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.topMargin = 4
-            row.layoutParams = lp
-            upstreamListBox.addView(row)
-        }
-    }
-
-    private fun addUpstreamFromForm() {
-        val act = activity ?: return
-        val app = act.application as NetAverApp
-        val specs = app.prefs().upstreamList().toMutableList()
-        if (specs.size >= Prefs.MAX_UPSTREAMS) {
-            Toast.makeText(act, getString(R.string.max_upstreams_fmt, Prefs.MAX_UPSTREAMS), Toast.LENGTH_SHORT).show()
-            return
-        }
-        val spec = if (addPresetGroup.checkedRadioButtonId == R.id.add_custom) {
-            val raw = addCustomEt.text.toString().trim()
-            if (!Prefs.parseCustomUpstream(raw).valid) {
-                Toast.makeText(act,
-                    R.string.bad_format_upstream,
-                    Toast.LENGTH_LONG).show()
-                return
-            }
-            raw
-        } else {
-            val w = if (addPresetGroup.checkedRadioButtonId == R.id.add_google) 1
-                else if (addPresetGroup.checkedRadioButtonId == R.id.add_quad9) 2 else 0
-            "preset:$w"
-        }
-        if (specs.contains(spec)) {
-            Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
-            return
-        }
-        specs.add(spec)
-        app.prefs().setUpstreamList(specs)
-        addCustomEt.setText("")
-        rebuildUpstreamList(force = true)
-        refreshUpstreamLabel()
-    }
-
-    private fun removeUpstream(idx: Int) {
-        val act = activity ?: return
-        val app = act.application as NetAverApp
-        val specs = app.prefs().upstreamList().toMutableList()
-        if (specs.size <= 1) {
-            Toast.makeText(act, R.string.min_one_upstream, Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (idx < 0 || idx >= specs.size) return
-        specs.removeAt(idx)
-        app.prefs().setUpstreamList(specs)
-        rebuildUpstreamList(force = true)
-        refreshUpstreamLabel()
+        val shown = names.take(2).joinToString(", ")
+        val extra = if (names.size > 2) " +${names.size - 2}" else ""
+        val mode = getString(p.modeNameRes())
+        upstreamNames.text = if (shown.isEmpty()) mode else "$shown$extra · $mode"
     }
 
     fun refresh() {
@@ -255,10 +164,14 @@ class HomeFragment : Fragment() {
         } else {
             statusTv.setText(R.string.protected_on)
             statusTv.setTextColor(0xFF4ADE80.toInt())
-            // passive latency: EMA of real upstream queries (no extra traffic)
+            // passive latency: EMA of real upstream queries (no extra traffic).
+            // Show the last measured value for as long as the VPN is on: with
+            // a warm cache, upstream queries can be minutes apart, and the old
+            // 30 s freshness gate kept flickering this back to "—" even though
+            // the connection was fine (user report 2026-10-24). Mirrors the
+            // Upstream tab, which never age-gates its per-provider ping.
             val ema = DnsVpnService.dnsLatencyEmaMs
-            val age = System.currentTimeMillis() - DnsVpnService.dnsLatencyEmaAt
-            latencyTv.text = if (ema >= 0 && age < 30000) "${ema}ms" else "—"
+            latencyTv.text = if (ema >= 0) "${ema}ms" else "—"
         }
         if (!checking) powerLabel.setText(if (running) R.string.tap_to_stop else R.string.tap_to_start)
         // tint the vector power icon (fixes tofu box on devices lacking U+23FB)
@@ -268,32 +181,17 @@ class HomeFragment : Fragment() {
         statQueries.text = formatNum(totals[0])
         statBlocked.text = formatNum(totals[1])
         val rate = if (totals[0] == 0L) 0.0 else 100.0 * totals[1] / totals[0]
-        statRate.text = String.format("%.1f%%", rate)
+        statRate.text = String.format(Locale.US, "%.1f%%", rate)
 
         refreshUpstreamLabel()
-        val mode = app.prefs().upstreamMode()
-        val proto = app.prefs().getProtocol()
-        updatingRadio = true
-        modeGroup.check(
-            if (mode == Prefs.MODE_FASTEST) R.id.mode_fastest
-            else if (mode == Prefs.MODE_SEQUENTIAL) R.id.mode_sequential
-            else R.id.mode_parallel
-        )
-        protocolGroup.check(if (proto == 2) R.id.proto_doh else R.id.proto_dot)
-        updatingRadio = false
-        rebuildUpstreamList()
+        updateUpstreamRow()
         uptimeTv.text = if (!running) "" else if (offline) getString(R.string.waiting_connection) else getString(R.string.vpn_active)
-        // failover status (static on the service; empty when VPN is off)
-        val st = if (running) DnsVpnService.upstreamStatusLine else ""
-        upstreamStatusTv.text = st
-        val down = st.contains("DOWN")
-        upstreamStatusTv.setTextColor((if (down) 0xFFFBBF24 else 0xFF8B93A7).toInt())
     }
 
     companion object {
         private fun formatNum(n: Long): String {
-            if (n >= 1_000_000) return String.format("%.1fM", n / 1_000_000.0)
-            if (n >= 1_000) return String.format("%.1fK", n / 1_000.0)
+            if (n >= 1_000_000) return String.format(Locale.US, "%.1fM", n / 1_000_000.0)
+            if (n >= 1_000) return String.format(Locale.US, "%.1fK", n / 1_000.0)
             return n.toString()
         }
     }

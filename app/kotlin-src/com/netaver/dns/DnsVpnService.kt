@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.netaver.dns.dns.BlocklistManager
+import com.netaver.dns.dns.DnsCache
 import com.netaver.dns.dns.DnsMessage
 import com.netaver.dns.dns.DnsUpstream
 import com.netaver.dns.dns.DohUpstream
@@ -139,6 +140,16 @@ class DnsVpnService : VpnService() {
             else dnsLatencyEmaMs = (dnsLatencyEmaMs * 3 + ms) / 4
             dnsLatencyEmaAt = System.currentTimeMillis()
         }
+
+        /**
+         * Per-upstream latency EMA for the Upstream tab, keyed by spec string.
+         * Passive like the Home latency: fed by real queries only (zero extra
+         * traffic). Cleared when the VPN stops, so the tab shows "—" while off.
+         */
+        @JvmField
+        val upstreamPingMs = ConcurrentHashMap<String, Long>()
+        @JvmField
+        val upstreamPingAt = ConcurrentHashMap<String, Long>()
     }
 
     @Volatile
@@ -180,6 +191,11 @@ class DnsVpnService : VpnService() {
     private val upstreamFails = ConcurrentHashMap<String, AtomicInteger>() // fp -> consec fails
     private val upstreamDown = ConcurrentHashMap<String, Boolean>() // fp -> true when marked down
     private val upstreamEma = ConcurrentHashMap<String, Long>() // fp -> latency EMA ms (fastest mode)
+    private val fpToSpec = ConcurrentHashMap<String, MutableSet<String>>() // fp -> specs resolving to it (E2: was a single spec — specs sharing one target lost their ping)
+    // E3: fps of the most recently resolved target list; the status line
+    // counts DOWN entries against this set so removed specs don't linger
+    @Volatile
+    private var lastResolvedFps: Set<String> = emptySet()
     private val connMap = ConcurrentHashMap<String, DnsUpstream>() // fp -> persistent connection
     private val connLocks = ConcurrentHashMap<String, Any>() // fp -> lock (one query at a time per conn)
     private var raceExec: ExecutorService? = null // parallel-mode fan-out (I/O-blocked threads)
@@ -233,6 +249,15 @@ class DnsVpnService : VpnService() {
 
     private fun startVpn() {
         try {
+            // M10 follow-up: stopVpn() shuts the refresh executor down. If
+            // this instance is started again in place (a start intent raced
+            // ahead of onDestroy after stopSelf), recreate it — otherwise
+            // optimistic cache refresh stays silently dead, and dedupe keys
+            // of tasks discarded by shutdownNow would block refreshes.
+            if (cacheRefreshIo.isShutdown) {
+                cacheRefreshIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+                cacheRefreshing.clear()
+            }
             val b = Builder()
             b.setSession("NetAver DNS")
             b.addAddress("10.8.0.2", 32)
@@ -400,7 +425,9 @@ class DnsVpnService : VpnService() {
         // DNS flush: drop bootstrap-resolved upstream IPs, DNS cache,
         // stale UID mappings, and force upstream connections to be recreated.
         synchronized(bootstrapCache) { bootstrapCache.clear() }
-        (application as NetAverApp).dnsCache().clear()
+        if (prefs.cacheFlushOnNetworkChange()) {
+            (application as NetAverApp).dnsCache().clear()
+        }
         resolver.clear()
         netEpoch.incrementAndGet()
         // network change may have fixed dead upstreams: clear their failure
@@ -425,6 +452,8 @@ class DnsVpnService : VpnService() {
     private fun stopVpn() {
         running = false
         vpnActive = false
+        upstreamPingMs.clear()
+        upstreamPingAt.clear()
         VpnTileService.requestRefresh(this)
         unregisterNetworkCallback()
         try {
@@ -441,6 +470,10 @@ class DnsVpnService : VpnService() {
             probeThread?.interrupt()
             try { raceExec?.shutdownNow() } catch (ignored: Exception) { }
             raceExec = null
+            // M10: the optimistic-cache refresh executor was never shut
+            // down — one thread leaked per service lifecycle
+            try { cacheRefreshIo.shutdownNow() } catch (ignored: Exception) { }
+            cacheRefreshing.clear() // discarded tasks never run their finally
             closeAllConns()
             tun?.close()
         } catch (e: Exception) {
@@ -565,6 +598,57 @@ class DnsVpnService : VpnService() {
     private val bootstrapCache = HashMap<String, String>()
 
     /**
+     * M2: header+question of a DNS *response* as (id, qname, qtype), or
+     * null if unparseable or not a single-question response.
+     * DnsMessage.parseQuery() refuses QR=1 packets, so responses are
+     * walked locally here with the same label/pointer discipline.
+     */
+    private fun responseQuestion(data: ByteArray, len: Int): Triple<Int, String, Int>? {
+        try {
+            if (len < 12) return null
+            if ((data[2].toInt() and 0x80) == 0) return null // QR must be set
+            val qd = ((data[4].toInt() and 0xFF) shl 8) or (data[5].toInt() and 0xFF)
+            if (qd != 1) return null
+            val id = ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
+            var p = 12
+            val name = StringBuilder()
+            // B2: same discipline as DnsMessage.parseQuery (E6) — label
+            // steps bounded separately (128) from pointer jumps (16); the
+            // old single counter rejected legal names with >16 labels.
+            var jumps = 0
+            var steps = 0
+            var afterPtr = -1
+            while (true) {
+                if (p >= len || steps++ > 128) return null
+                val lbl = data[p].toInt() and 0xFF
+                if (lbl == 0) { p++; break }
+                if ((lbl and 0xC0) == 0xC0) {
+                    if (++jumps > 16) return null
+                    if (p + 1 >= len) return null
+                    val ptr = ((lbl and 0x3F) shl 8) or (data[p + 1].toInt() and 0xFF)
+                    if (ptr >= len) return null
+                    if (afterPtr < 0) afterPtr = p + 2
+                    p = ptr
+                    continue
+                }
+                if (lbl > 63 || p + 1 + lbl > len) return null
+                if (name.isNotEmpty()) name.append('.')
+                name.append(String(data, p + 1, lbl, Charsets.US_ASCII).lowercase())
+                if (name.length > 253) return null
+                p += 1 + lbl
+            }
+            val qpos = if (afterPtr >= 0) afterPtr else p
+            if (qpos + 4 > len) return null
+            val qtype = ((data[qpos].toInt() and 0xFF) shl 8) or
+                    (data[qpos + 1].toInt() and 0xFF)
+            if (name.isEmpty()) return null
+            return Triple(id, name.toString(), qtype)
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    /**
      * Resolve a hostname to IP via plain DNS to 1.1.1.1 on a protected
      * socket (bypasses our own VPN, no chicken-and-egg).
      */
@@ -581,12 +665,27 @@ class DnsVpnService : VpnService() {
             ds.soTimeout = 4000
             val q = DnsMessage.buildQuery(host, 1) ?: return null
             val server = InetAddress.getByName("1.1.1.1")
+            // M2: connect() so the kernel drops packets from other
+            // sources, then accept only the answer to OUR query (TXID +
+            // question name); anything else is discarded until the timeout.
+            ds.connect(server, 53)
             ds.send(DatagramPacket(q, q.size, server, 53))
+            val qid = ((q[0].toInt() and 0xFF) shl 8) or (q[1].toInt() and 0xFF)
             val buf = ByteArray(512)
-            val rp = DatagramPacket(buf, buf.size)
-            ds.receive(rp)
-            val ips = DnsMessage.extractIps(buf, rp.length)
-            if (ips.isNotEmpty()) ip = ips[0]
+            val deadline = System.currentTimeMillis() + ds.soTimeout
+            while (true) {
+                val remain = deadline - System.currentTimeMillis()
+                if (remain <= 0) break
+                ds.soTimeout = remain.toInt().coerceAtLeast(1)
+                val rp = DatagramPacket(buf, buf.size)
+                ds.receive(rp)
+                val rq = responseQuestion(buf, rp.length) ?: continue
+                if (rq.first != qid) continue
+                if (!rq.second.equals(host, ignoreCase = true)) continue
+                val ips = DnsMessage.extractIps(buf, rp.length)
+                if (ips.isNotEmpty()) ip = ips[0]
+                break
+            }
         } catch (e: Exception) {
             Log.d(TAG, "bootstrap resolve failed for $host", e)
         } finally {
@@ -613,9 +712,18 @@ class DnsVpnService : VpnService() {
             t.tlsHost = Prefs.upstreamTlsHost(0)
             t.port = if (t.proto == 2) 443 else 853
             t.label = Prefs.protoName(t.proto) + " " + t.ip
+            lastResolvedFps = setOf(targetFp(t)) // E3
             return listOf(t)
         }
-        return specs.mapNotNull { spec -> specToTarget(spec) }.ifEmpty {
+        val targets = specs.mapNotNull { spec ->
+            val t = specToTarget(spec) ?: return@mapNotNull null
+            // E2: register the spec in the fp's spec SET — several specs can
+            // resolve to the same target, and every one gets the ping
+            fpToSpec.computeIfAbsent(targetFp(t)) {
+                java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+            }.add(spec) // let health/latency find its way back to the UI
+            t
+        }.ifEmpty {
             // all specs invalid: fall back to Cloudflare rather than failing closed
             val t = UpstreamTarget()
             t.proto = prefs.getProtocol()
@@ -625,6 +733,8 @@ class DnsVpnService : VpnService() {
             t.label = Prefs.protoName(t.proto) + " 1.1.1.1"
             listOf(t)
         }
+        lastResolvedFps = targets.map { targetFp(it) }.toSet() // E3
+        return targets
     }
 
     /** "preset:0|1|2" or free-form spec -> resolved target (bootstrap if hostname). */
@@ -721,6 +831,30 @@ class DnsVpnService : VpnService() {
         closeAllConns()
         upstreamFails.clear()
         upstreamDown.clear()
+        // E2: prune per-spec ping state and the fp->specs bridge to the
+        // specs still configured — a removed spec's stale ping must never
+        // reappear, and dead specs must not keep receiving samples
+        val currentSpecs = prefs.upstreamList().toSet()
+        for (k in ArrayList(upstreamPingMs.keys)) {
+            if (k !in currentSpecs) upstreamPingMs.remove(k)
+        }
+        for (k in ArrayList(upstreamPingAt.keys)) {
+            if (k !in currentSpecs) upstreamPingAt.remove(k)
+        }
+        val entries = fpToSpec.entries.iterator()
+        while (entries.hasNext()) {
+            val e = entries.next()
+            e.value.retainAll(currentSpecs)
+            if (e.value.isEmpty()) entries.remove()
+        }
+        // F2 (E3 gap): refresh the resolved-fp set and the status line
+        // NOW. updateUpstreamStatus otherwise runs only on health
+        // events, so after the user removed a DOWN upstream the line
+        // kept counting it for as long as the VPN idled with no
+        // traffic. Resolving here (the next query would do it anyway)
+        // also re-registers the surviving specs in the ping bridge.
+        resolveUpstreamList()
+        updateUpstreamStatus()
     }
 
     /** Persistent connection for a target (one at a time per target; no handshake per query). */
@@ -834,12 +968,16 @@ class DnsVpnService : VpnService() {
         val exec = raceExec
         // executor gone or shutting down (race with stopVpn): fall back to ordered
         if (exec == null || exec.isShutdown) return queryOrdered(cands, qdata, qlen)
+        // F1: race each distinct target once — two specs can resolve to
+        // the same fp (possible via imported configs, which bypass the
+        // UI's endpoint dedupe); racing it twice could also note it twice.
+        val racers = cands.distinctBy { targetFp(it) }
         val q = qdata.copyOf(qlen)
         val win = AtomicReference<UpstreamAnswer?>()
         val latch = CountDownLatch(1)
         val failed = ConcurrentHashMap<String, Boolean>()
-        val futures = ArrayList<java.util.concurrent.Future<*>>(cands.size)
-        for (t in cands) {
+        val futures = ArrayList<java.util.concurrent.Future<*>>(racers.size)
+        for (t in racers) {
             val fp = targetFp(t)
             val f = try {
                 exec.submit {
@@ -847,6 +985,7 @@ class DnsVpnService : VpnService() {
                         val a = querySingle(t, q)
                         if (a != null) {
                             if (win.compareAndSet(null, a)) latch.countDown()
+                            else noteUpstreamSuccess(fp, a.latencyMs) // answered too: counts as ping data
                         } else {
                             failed[fp] = true
                         }
@@ -861,15 +1000,37 @@ class DnsVpnService : VpnService() {
             }
             if (f != null) futures.add(f)
         }
+        var timedOut = false
         try {
-            latch.await(RACE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            timedOut = !latch.await(RACE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
         }
-        // losers still in flight are NOT marked failed (outcome unknown);
-        // cancel only unblocks pool bookkeeping, sockets end on their own timeout
+        // F1: snapshot the failures BEFORE the timeout scan below. A
+        // racer that fails (naturally, or via the cancel interrupt)
+        // while the scan is noting the still-flying ones would
+        // otherwise land in the returned list too, and the caller would
+        // note the same failure a second time — one total timeout
+        // burning the failover streak twice. A failure landing inside
+        // the scan window may miss its note this round; that is
+        // strictly better than double-noting.
+        val failedSnapshot = failed.keys.toList()
+        if (timedOut) {
+            // E1: total timeout — nobody answered in time. Every racer
+            // that neither won nor already recorded a failure gets ONE
+            // failure note; otherwise chronically slow upstreams are never
+            // marked down and every query keeps paying the full timeout.
+            val winnerFp = win.get()?.winnerFp
+            for (t in racers) {
+                val fp = targetFp(t)
+                if (fp != winnerFp && !failed.containsKey(fp)) noteUpstreamFailure(fp)
+            }
+        }
+        // when a winner arrived, losers still in flight are NOT marked
+        // failed (outcome unknown); cancel only unblocks pool bookkeeping,
+        // sockets end on their own timeout
         for (f in futures) f.cancel(true)
-        return UpstreamQueryResult(win.get(), failed.keys.toList())
+        return UpstreamQueryResult(win.get(), failedSnapshot)
     }
 
     // ---------------- upstream health (per-target failover) ----------------
@@ -879,6 +1040,17 @@ class DnsVpnService : VpnService() {
         upstreamFails[fp]?.set(0)
         val prev = upstreamEma[fp]
         upstreamEma[fp] = if (prev == null) latencyMs else (prev * 3 + latencyMs) / 4
+        // publish for the Upstream tab (per-provider ping), keyed by spec —
+        // E2: EVERY spec that resolves to this target gets the sample, so
+        // specs sharing one server all show a live ping
+        val specsForFp = fpToSpec[fp]
+        if (specsForFp != null) {
+            for (spec in specsForFp) {
+                val prevP = upstreamPingMs[spec]
+                upstreamPingMs[spec] = if (prevP == null) latencyMs else (prevP * 3 + latencyMs) / 4
+                upstreamPingAt[spec] = System.currentTimeMillis()
+            }
+        }
         updateUpstreamStatus()
     }
 
@@ -901,7 +1073,10 @@ class DnsVpnService : VpnService() {
         val mode = p?.let { wctx2.getString(it.modeNameRes()) }
             ?: wctx2.getString(com.netaver.dns.R.string.mode_parallel)
         val n = p?.upstreamList()?.size ?: 0
-        val down = upstreamDown.size
+        // E3: count only fps still in the resolved config — upstreamDown
+        // entries for specs the user removed must not linger as "DOWN"
+        // in the status line while the VPN idles
+        val down = upstreamDown.keys.count { it in lastResolvedFps }
         upstreamStatusLine = if (down > 0) "$mode · $n upstream · $down DOWN"
         else "$mode · $n upstream"
     }
@@ -1052,15 +1227,28 @@ class DnsVpnService : VpnService() {
             matchInfo = "Custom rule"
         } else if (custom < 0) {
             // allowlisted: serve from cache when possible, else upstream
-            val cached = cacheLookup(msg)
-            if (cached != null) {
-                matchInfo = "Cache"
-                resp = cached
+            val hit = cacheLookup(msg)
+            if (hit != null) {
+                matchInfo = if (hit.stale) "Cache (stale)" else "Cache"
+                resp = hit.bytes
+                if (hit.stale) maybeRefreshCache(qdata, qlen, msg)
             } else {
-                matchInfo = "Allowlist rule"
                 r.upstreamHit = true
-                resp = queryUpstreamMulti(qdata, qlen)?.resp
-                cacheStore(msg, resp)
+                val ans = queryUpstreamMulti(qdata, qlen)?.resp
+                if (ans != null) {
+                    matchInfo = "Allowlist rule"
+                    resp = ans
+                    cacheStore(msg, ans)
+                } else {
+                    // B1: mirror the normal branch below — when every
+                    // upstream fails, fail fast with SERVFAIL instead of
+                    // sending nothing (the client would hang for its
+                    // full timeout). Same matchInfo and no caching, so
+                    // the log shows the outcome exactly like a normal
+                    // query whose upstreams all failed.
+                    resp = DnsMessage.buildServFail(msg)
+                    matchInfo = "Upstream (all failed)"
+                }
             }
         } else {
             val src = blocklists.blocklist().matchSource(msg.qname)
@@ -1069,10 +1257,11 @@ class DnsVpnService : VpnService() {
                 resp = DnsMessage.buildBlockedResponse(msg)
                 matchInfo = blocklists.displayNameForSource(src)
             } else {
-                val cached = cacheLookup(msg)
-                if (cached != null) {
-                    matchInfo = "Cache"
-                    resp = cached
+                val hit = cacheLookup(msg)
+                if (hit != null) {
+                    matchInfo = if (hit.stale) "Cache (stale)" else "Cache"
+                    resp = hit.bytes
+                    if (hit.stale) maybeRefreshCache(qdata, qlen, msg)
                 } else {
                     r.upstreamHit = true
                     val ans = queryUpstreamMulti(qdata, qlen)
@@ -1122,9 +1311,40 @@ class DnsVpnService : VpnService() {
     // ---------------- upstream failover ----------------
 
     /** Cache lookup (query ID rewritten on hit). Null when disabled/miss. */
-    private fun cacheLookup(msg: DnsMessage): ByteArray? {
+    private fun cacheLookup(msg: DnsMessage): DnsCache.Hit? {
         if (!prefs.dnsCacheEnabled()) return null
-        return (application as NetAverApp).dnsCache().get(msg.qname ?: "", msg.qtype, msg.id)
+        return (application as NetAverApp).dnsCache().lookup(msg.qname ?: "", msg.qtype, msg.id)
+    }
+
+    @Volatile
+    private var cacheRefreshIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val cacheRefreshing: MutableSet<String> =
+        java.util.Collections.synchronizedSet(HashSet())
+
+    /**
+     * Optimistic caching: an expired answer was just served as-is; fetch a
+     * fresh copy in the background so the next query is up to date.
+     * At most one refresh per (name, type) at a time.
+     */
+    private fun maybeRefreshCache(qdata: ByteArray, qlen: Int, msg: DnsMessage) {
+        val key = "${msg.qtype}|${msg.qname}"
+        if (!cacheRefreshing.add(key)) return
+        val qcopy = qdata.copyOf(qlen)
+        try {
+            cacheRefreshIo.execute {
+                try {
+                    val ans = queryUpstreamMulti(qcopy, qcopy.size)
+                    if (ans?.resp != null) cacheStore(msg, ans.resp)
+                } catch (_: Exception) {
+                    // a failed refresh is fine: the stale entry stays until its next try
+                } finally {
+                    cacheRefreshing.remove(key)
+                }
+            }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            // M10: stopVpn() already shut the executor down — drop silently
+            cacheRefreshing.remove(key)
+        }
     }
 
     /**
@@ -1142,9 +1362,9 @@ class DnsVpnService : VpnService() {
         val custom = (application as NetAverApp).customRules().match(msg.qname)
         if (custom < 0) {
             // allowlist wins (mirrors online): serve cache, else fail fast
-            val cached = cacheLookup(msg)
-            resp = cached ?: DnsMessage.buildServFail(msg)
-            r.matchInfo = if (cached != null) "Cache (offline)" else "Offline"
+            val hit = cacheLookup(msg)
+            resp = hit?.bytes ?: DnsMessage.buildServFail(msg)
+            r.matchInfo = if (hit != null) "Cache (offline)" else "Offline"
         } else if (custom > 0) {
             r.blocked = true
             resp = DnsMessage.buildBlockedResponse(msg)
@@ -1156,9 +1376,9 @@ class DnsVpnService : VpnService() {
                 resp = DnsMessage.buildBlockedResponse(msg)
                 r.matchInfo = blocklists.displayNameForSource(src)
             } else {
-                val cached = cacheLookup(msg)
-                if (cached != null) {
-                    resp = cached
+                val hit = cacheLookup(msg)
+                if (hit != null) {
+                    resp = hit.bytes
                     r.matchInfo = "Cache (offline)"
                 } else {
                     resp = DnsMessage.buildServFail(msg)
@@ -1178,6 +1398,12 @@ class DnsVpnService : VpnService() {
     /** Store an upstream response in cache (honors TTL). */
     private fun cacheStore(msg: DnsMessage, resp: ByteArray?) {
         if (resp == null || !prefs.dnsCacheEnabled()) return
+        // M2 (defense in depth): never cache an answer whose question does
+        // not echo the query — a spoofed or mismatched packet must not
+        // poison the cache even if an upstream path let it through.
+        val rq = responseQuestion(resp, resp.size)
+        if (rq == null || rq.first != msg.id || rq.second != msg.qname ||
+                rq.third != msg.qtype) return
         (application as NetAverApp).dnsCache().put(msg.qname ?: "", msg.qtype, resp, resp.size)
     }
 
@@ -1197,6 +1423,21 @@ class DnsVpnService : VpnService() {
         if (r.blocked) scheduleNotifUpdate()
     }
 
+    /**
+     * B3: an answer longer than the max UDP payload (65535 − 20 IP −
+     * 8 UDP = 65507) is legal over DoT/DoH/TCP, but buildUdp would wrap
+     * its length fields mod 65536 and the client would receive a corrupt
+     * packet. Substitute a TC-bit response instead so the client
+     * retries over TCP, where the full answer is delivered. (Logging
+     * still records the real answer; this is a wire-format concern only.)
+     */
+    private fun fitUdpPayload(qdata: ByteArray, qlen: Int, resp: ByteArray): ByteArray {
+        if (resp.size <= 65507) return resp
+        val msg = DnsMessage.parseQuery(qdata, qlen)
+        if (!msg.ok) return resp
+        return DnsMessage.buildTruncatedResponse(msg) ?: resp
+    }
+
     private fun handleDns(query: ByteArray) {
         val p = IpPacket.parse(query, query.size) ?: return
         if (p.protocol != IpPacket.PROTO_UDP) return
@@ -1212,7 +1453,7 @@ class DnsVpnService : VpnService() {
         if (networkLost) {
             // offline: serve cache/blocklist only, fail fast otherwise; nothing logged
             val r = processDnsQueryOffline(qdata, qlen)
-            val offlineResp = r?.resp
+            val offlineResp = r?.resp?.let { fitUdpPayload(qdata, qlen, it) } // B3
             if (offlineResp != null) {
                 val out = ByteArray(28 + offlineResp.size)
                 val total = IpPacket.buildUdp(
@@ -1228,7 +1469,7 @@ class DnsVpnService : VpnService() {
         // health accounting already done inside queryUpstreamMulti (per-target);
         // cache/blocked hits are neutral
         r.bypass = isBypassDns(p.dstIp) // hardcoded DNS (e.g. 8.8.8.8), not 10.8.0.1
-        val resp = r.resp
+        val resp = r.resp?.let { fitUdpPayload(qdata, qlen, it) } // B3
         if (resp != null) {
             val out = ByteArray(28 + resp.size)
             val total = IpPacket.buildUdp(

@@ -33,6 +33,15 @@ class ListsFragment : Fragment() {
     private lateinit var mgr: BlocklistManager
     private lateinit var prefs: Prefs
 
+    // M5 fix: the change listener lives in a named field so onDestroyView
+    // can unregister this exact instance (an inline lambda could never be
+    // removed, and the manager would retain the fragment forever).
+    // M4 fix: the posted body re-checks isAdded before touching views.
+    private val listsChangedListener = Runnable {
+        val a = activity ?: return@Runnable
+        a.runOnUiThread { if (isAdded) refreshNow() }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -61,6 +70,9 @@ class ListsFragment : Fragment() {
                 mgr.refreshCustomLists()
                 val a = activity ?: return@Thread
                 a.runOnUiThread {
+                    // M4 fix: the tab may have been switched away while the
+                    // refresh ran; touching views/getString now would crash.
+                    if (!isAdded) return@runOnUiThread
                     updBtn.isEnabled = true
                     updBtn.setText(R.string.update_lists)
                     refreshNow()
@@ -70,10 +82,7 @@ class ListsFragment : Fragment() {
             }, "bl-update").start()
         }
 
-        mgr.addChangeListener {
-            val a = activity ?: return@addChangeListener
-            a.runOnUiThread { refreshNow() }
-        }
+        mgr.addChangeListener(listsChangedListener)
 
         val rulesBtn: Button = v.findViewById(R.id.custom_rules_btn)
         rulesBtn.text = getString(R.string.custom_rules) +
@@ -82,6 +91,12 @@ class ListsFragment : Fragment() {
 
         refreshNow()
         return v
+    }
+
+    override fun onDestroyView() {
+        // M5 fix: unregister so BlocklistManager doesn't retain this fragment
+        mgr.removeChangeListener(listsChangedListener)
+        super.onDestroyView()
     }
 
     private fun showRulesDialog(rulesBtn: Button) {
@@ -95,6 +110,10 @@ class ListsFragment : Fragment() {
         et.minLines = 10
         et.gravity = Gravity.TOP
         et.typeface = Typeface.MONOSPACE
+        // A bare programmatic EditText inherits the theme's large default
+        // text size — on the user's device the rules editor rendered huge
+        // (long domains wrapped mid-word). Pin a compact editor size.
+        et.textSize = 13f
         val sv = ScrollView(act)
         sv.setPadding(40, 20, 40, 0)
         sv.addView(et)
@@ -116,6 +135,9 @@ class ListsFragment : Fragment() {
     }
 
     private fun refreshNow() {
+        // M4 fix: async completions can land after this fragment detached;
+        // getString() below would throw IllegalStateException.
+        if (!isAdded) return
         val rows = ArrayList<Row>()
         rows.add(Row(getString(R.string.builtin_list_name), "bundled",
             prefs.builtinEnabled(), ruleCount("bundled"), true, null))
@@ -181,13 +203,19 @@ class ListsFragment : Fragment() {
             list.requestLayout()
             return
         }
-        val probe = adapter.getView(0, null, list)
+        // U-N7: measure EVERY row and sum the heights — rows whose status
+        // text wraps are taller than row 0, and the old row0*count
+        // estimate undershot and clipped the bottom rows.
         val wSpec = View.MeasureSpec.makeMeasureSpec(
             resources.displayMetrics.widthPixels, View.MeasureSpec.AT_MOST)
         val hSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        probe.measure(wSpec, hSpec)
+        var h = list.dividerHeight * (count - 1)
+        for (i in 0 until count) {
+            val row = adapter.getView(i, null, list)
+            row.measure(wSpec, hSpec)
+            h += row.measuredHeight
+        }
         val cap = (300 * resources.displayMetrics.density).toInt()
-        var h = probe.measuredHeight * count + list.dividerHeight * (count - 1)
         if (h > cap) h = cap
         if (list.layoutParams.height != h) {
             list.layoutParams.height = h
@@ -216,7 +244,19 @@ class ListsFragment : Fragment() {
             .setPositiveButton(R.string.add) { _, _ ->
                 var name = nameEt.text.toString().trim()
                 val url = urlEt.text.toString().trim()
-                if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
+                if (url.isEmpty()) {
+                    Toast.makeText(act, R.string.invalid_url, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (!url.startsWith("https://", ignoreCase = true)) {
+                    Toast.makeText(act, R.string.list_https_only, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (url.contains(';') || url.contains('|') || url.any { it.isWhitespace() }) {
+                    // N3/U-N6: ';' and '|' are the stored format's
+                    // delimiters — such a URL saves fine but re-parses
+                    // truncated/disabled on the next read (the import
+                    // path drops these for exactly this reason)
                     Toast.makeText(act, R.string.invalid_url, Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
@@ -275,7 +315,9 @@ class ListsFragment : Fragment() {
             if (!r.enabled) {
                 status = ctx.getString(R.string.status_disabled)
             } else if (r.error != null) {
-                status = ctx.getString(R.string.status_failed_fmt, r.error)
+                val errText = if (r.error == BlocklistManager.ERR_HTTPS_ONLY)
+                    ctx.getString(R.string.list_https_only) else r.error
+                status = ctx.getString(R.string.status_failed_fmt, errText)
             } else if (r.rules == 0 && !r.isBuiltin) {
                 status = ctx.getString(R.string.status_not_downloaded)
             } else {

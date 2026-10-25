@@ -53,38 +53,61 @@ class NetAverApp : Application() {
         geoIpInstance.setEnabled(prefsInstance.geoipEnabled())
         customRulesInstance = CustomRules()
         customRulesInstance.setText(prefsInstance.customRules())
+        dnsCacheInstance.configure(prefsInstance.cacheMinTtlSec(), prefsInstance.cacheOptimistic(), prefsInstance.cacheMaxEntries())
+        logBusInstance.setLoggingMode(prefsInstance.loggingMode())
         // Load bundled list off the main thread; custom URLs refresh on VPN start.
         Thread({ blocklistManagerInstance.loadBundled() }, "bl-init").start()
         // Restore persisted logs off the main thread (survive restarts/updates).
         // GeoIp's disk cache is already loaded, so flags come back for free.
+        // A1 follow-up: snapshot the clear generation and the process-start
+        // time HERE, synchronously in onCreate (main thread, before any UI
+        // exists) — a user clear can then never predate the snapshot, and
+        // the first-run seed counts only history from BEFORE this process,
+        // so rows this process already counted live are never counted twice.
+        val genSnapshot = logBusInstance.clearGeneration()
+        val procStartMs = System.currentTimeMillis()
         Thread({
+            val gen = genSnapshot
             // Seed the all-time Home counters (v2.2.10): first run counts the
             // stored history once; later runs reload the persisted totals.
+            // M1: seeding is additive and persists the merged value itself,
+            // so nothing here writes the totals twice or clobbers live ones.
+            val seeded: Boolean
             if (!prefsInstance.totalsSeeded()) {
-                val c = logStoreInstance.countAll()
-                logBusInstance.seedAllTime(c[0], c[1])
-                prefsInstance.setTotalsAll(c[0], c[1])
-                prefsInstance.setTotalsSeeded()
+                val c = logStoreInstance.countAll(procStartMs)
+                seeded = logBusInstance.seedAllTimeIfCurrent(gen, c[0], c[1])
+                if (seeded) {
+                    prefsInstance.setTotalsSeeded()
+                } else {
+                    // Gate dropped = a Clear Logs intervened and already
+                    // persisted zeroed totals; align the seeded flag so
+                    // later starts take the prefs branch, not countAll.
+                    prefsInstance.setTotalsAll(0, 0)
+                    prefsInstance.setTotalsSeeded()
+                }
             } else {
                 val t = prefsInstance.totalsAll()
-                logBusInstance.seedAllTime(t[0], t[1])
+                seeded = logBusInstance.seedAllTimeIfCurrent(gen, t[0], t[1])
             }
-            val dns = ArrayList<Entries.DnsEntry>()
-            val conns = ArrayList<Entries.ConnEntry>()
-            logStoreInstance.loadRecent(dns, conns)
-            for (d in dns) {
-                if (d.resolvedIp.isNotEmpty() && d.countryCode.isEmpty()) {
-                    val cc = geoIpInstance.cached(d.resolvedIp)
-                    if (cc.isNotEmpty()) d.countryCode = cc
+            // A clear intervened while seeding: skip the restore entirely.
+            if (seeded) {
+                val dns = ArrayList<Entries.DnsEntry>()
+                val conns = ArrayList<Entries.ConnEntry>()
+                logStoreInstance.loadRecent(dns, conns)
+                for (d in dns) {
+                    if (d.resolvedIp.isNotEmpty() && d.countryCode.isEmpty()) {
+                        val cc = geoIpInstance.cached(d.resolvedIp)
+                        if (cc.isNotEmpty()) d.countryCode = cc
+                    }
                 }
-            }
-            for (c in conns) {
-                if (c.countryCode.isEmpty()) {
-                    val cc = geoIpInstance.cached(ipFromDest(c.dest))
-                    if (cc.isNotEmpty()) c.countryCode = cc
+                for (c in conns) {
+                    if (c.countryCode.isEmpty()) {
+                        val cc = geoIpInstance.cached(ipFromDest(c.dest))
+                        if (cc.isNotEmpty()) c.countryCode = cc
+                    }
                 }
+                logBusInstance.restoreIfCurrent(gen, dns, conns)
             }
-            logBusInstance.restore(dns, conns)
         }, "log-restore").start()
     }
 

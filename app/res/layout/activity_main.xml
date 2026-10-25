@@ -15,13 +15,14 @@
         android:layout_width="match_parent"
         android:layout_height="64dp"
         android:orientation="horizontal"
-        android:background="@color/surface"
+        android:background="@drawable/nav_bg"
         android:paddingTop="6dp">
 
         <Button android:id="@+id/nav_home" style="@style/NavButton" android:text="@string/tab_home" />
         <Button android:id="@+id/nav_dns" style="@style/NavButton" android:text="@string/tab_dns" />
         <Button android:id="@+id/nav_apps" style="@style/NavButton" android:text="@string/tab_apps" />
         <Button android:id="@+id/nav_lists" style="@style/NavButton" android:text="@string/tab_lists" />
+        <Button android:id="@+id/nav_upstream" style="@style/NavButton" android:text="@string/tab_upstream" />
         <Button android:id="@+id/nav_settings" style="@style/NavButton" android:text="@string/tab_settings" />
     </LinearLayout>
 </LinearLayout>

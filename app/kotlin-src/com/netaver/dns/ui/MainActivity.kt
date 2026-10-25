@@ -25,6 +25,9 @@ class MainActivity : Activity() {
 
     private lateinit var navButtons: Array<Button>
     private var currentTab = 0
+    // M11 fix: preset filter of a Log tab opened via openDnsLog (-1 = none);
+    // saved/restored across recreation together with currentTab.
+    private var logPreset = -1
     private val handler = Handler(Looper.getMainLooper())
     private var statsTick: Runnable? = null
 
@@ -35,17 +38,47 @@ class MainActivity : Activity() {
         navButtons = arrayOf(
             findViewById(R.id.nav_home), findViewById(R.id.nav_dns),
             findViewById(R.id.nav_apps), findViewById(R.id.nav_lists),
-            findViewById(R.id.nav_settings)
+            findViewById(R.id.nav_upstream), findViewById(R.id.nav_settings)
         )
         for (i in navButtons.indices) {
             val idx = i
             navButtons[i].setOnClickListener { switchTab(idx) }
         }
-        switchTab(0)
+        if (savedInstanceState == null) {
+            switchTab(0)
+        } else {
+            // M11 fix: on recreation FragmentManager has already restored the
+            // visible fragment (and the back stack) — replacing it here would
+            // throw the user back to Home and lose e.g. the preset Log filter.
+            val restoredTab = savedInstanceState.getInt("tab", 0)
+            val restoredFilter = savedInstanceState.getInt("log_filter", -1)
+            if (fragmentManager.findFragmentById(R.id.fragment_container) != null) {
+                // Fragment restored in place: only restore tab bookkeeping
+                // and the nav highlight, exactly as switchTab paints it.
+                currentTab = restoredTab
+                logPreset = restoredFilter
+                for (i in navButtons.indices) {
+                    navButtons[i].setTextColor(if (i == restoredTab) 0xFF60A5FA.toInt() else 0xFF8B93A7.toInt())
+                }
+            } else if (restoredTab == 1 && restoredFilter >= 0) {
+                openDnsLog(restoredFilter)
+            } else {
+                switchTab(restoredTab)
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        // M11 fix: persist tab + log preset so onCreate can restore them
+        outState.putInt("tab", currentTab)
+        outState.putInt("log_filter", logPreset)
+        super.onSaveInstanceState(outState)
     }
 
     private fun switchTab(idx: Int) {
         currentTab = idx
+        // M11 fix: any tab other than Log drops the remembered log preset
+        if (idx != 1) logPreset = -1
         for (i in navButtons.indices) {
             navButtons[i].setTextColor(if (i == idx) 0xFF60A5FA.toInt() else 0xFF8B93A7.toInt())
         }
@@ -53,7 +86,8 @@ class MainActivity : Activity() {
             1 -> DnsLogFragment()
             2 -> AppsFragment()
             3 -> ListsFragment()
-            4 -> SettingsFragment()
+            4 -> UpstreamFragment()
+            5 -> SettingsFragment()
             else -> HomeFragment()
         }
         // clear any detail pages from the back stack when switching tabs
@@ -68,6 +102,32 @@ class MainActivity : Activity() {
         fragmentManager.beginTransaction()
             .replace(R.id.fragment_container, AppDetailFragment.newInstance(appName))
             .addToBackStack("app_detail")
+            .commit()
+    }
+
+    /** Jump to the Upstream tab (from the Home summary row). */
+    fun openUpstream() {
+        switchTab(4)
+    }
+
+    /** Jump to the DNS Log tab with a preset filter (from the Home stat cards). */
+    fun openDnsLog(logFilter: Int) {
+        logPreset = logFilter // M11 fix: remember for recreation restore
+        currentTab = 1
+        for (i in navButtons.indices) {
+            navButtons[i].setTextColor(if (i == 1) 0xFF60A5FA.toInt() else 0xFF8B93A7.toInt())
+        }
+        fragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+        fragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, DnsLogFragment.newInstance(logFilter))
+            .commit()
+    }
+
+    /** Open a catalog provider's detail page (from UpstreamFragment). Back returns. */
+    fun openProviderDetail(index: Int) {
+        fragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, ProviderDetailFragment.newInstance(index))
+            .addToBackStack("provider_detail")
             .commit()
     }
 
@@ -87,7 +147,9 @@ class MainActivity : Activity() {
         if (now - p.lastUpdateCheck() < 24 * 3600 * 1000L) return
         p.setLastUpdateCheck(now)
         com.netaver.dns.util.UpdateChecker.fetch { list, raw ->
-            if (isFinishing) return@fetch
+            // M6 fix: isFinishing alone misses a destroyed (e.g. rotated)
+            // activity; showing the update dialog then throws BadToken.
+            if (isFinishing || isDestroyed) return@fetch
             if (raw != null) p.setCachedReleasesJson(raw)
             val latest = list?.firstOrNull() ?: return@fetch
             val upd = com.netaver.dns.util.Updater(this)
@@ -152,11 +214,15 @@ class MainActivity : Activity() {
         Thread({
             val result = checkInternet() // 0=ok, 1=no network, 2=upstream unreachable
             runOnUiThread {
-                home.setChecking(false)
-                if (result == 0) {
-                    startVpnFlow()
-                } else {
-                    showNoInternetDialog(result)
+                // M6 fix: the probe takes ~1.5s; the activity may be finished
+                // or destroyed by now — skip the whole UI follow-up then.
+                if (!isFinishing && !isDestroyed) {
+                    home.setChecking(false)
+                    if (result == 0) {
+                        startVpnFlow()
+                    } else {
+                        showNoInternetDialog(result)
+                    }
                 }
             }
         }, "net-check").start()

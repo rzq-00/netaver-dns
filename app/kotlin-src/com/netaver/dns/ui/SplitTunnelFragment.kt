@@ -1,9 +1,12 @@
 package com.netaver.dns.ui
 
+import android.app.ActivityManager
 import android.app.AlertDialog
 import android.app.Fragment
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +23,7 @@ import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 
+import com.netaver.dns.DnsVpnService
 import com.netaver.dns.NetAverApp
 import com.netaver.dns.R
 import com.netaver.dns.util.Prefs
@@ -55,8 +59,8 @@ class SplitTunnelFragment : Fragment() {
     /** Last saved/applied set; diff against [bypassed] drives the bar. */
     private lateinit var saved: MutableSet<String>
     private lateinit var prefs: Prefs
-    private val handler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
+    private var pendingRestartHandler: Handler? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -223,24 +227,51 @@ class SplitTunnelFragment : Fragment() {
 
     /** Restart VPN (debounced) so the change takes effect. */
     private fun scheduleRestart() {
-        pendingRestart?.let { handler.removeCallbacks(it) }
-        pendingRestart = Runnable {
-            val act = activity as? MainActivity ?: return@Runnable
-            if (act.isVpnRunning()) {
-                act.restartVpn()
-                Toast.makeText(act, R.string.split_restarted_toast,
+        val act = activity ?: return
+        val appCtx = act.applicationContext
+        // U-N3: the restart must survive this fragment's view being
+        // destroyed — Apply -> confirm -> Back within the delay used to
+        // cancel it silently (the callback hung on the fragment's view
+        // handler and onDestroyView removed it) while the new bypass
+        // set was already saved. It is therefore posted on a Handler
+        // created HERE, at apply time; onDestroyView deliberately does
+        // NOT remove it, and the runnable works with contexts only —
+        // mirroring MainActivity.restartVpn()/isVpnRunning() — never
+        // the fragment or its activity. Debounce is preserved by
+        // cancelling the previous pending restart explicitly.
+        pendingRestartHandler?.let { h -> pendingRestart?.let { h.removeCallbacks(it) } }
+        val h = Handler(Looper.getMainLooper())
+        val r = Runnable {
+            val am = appCtx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            var runningNow = false
+            if (am != null) {
+                for (s in am.getRunningServices(100)) {
+                    if (DnsVpnService::class.java.name == s.service.className) {
+                        runningNow = true
+                        break
+                    }
+                }
+            }
+            if (runningNow) {
+                val stop = Intent(appCtx, DnsVpnService::class.java)
+                stop.action = DnsVpnService.ACTION_STOP
+                appCtx.startService(stop)
+                h.postDelayed({
+                    val start = Intent(appCtx, DnsVpnService::class.java)
+                    start.action = DnsVpnService.ACTION_START
+                    if (Build.VERSION.SDK_INT >= 26) appCtx.startForegroundService(start)
+                    else appCtx.startService(start)
+                }, 1200)
+                Toast.makeText(appCtx, R.string.split_restarted_toast,
                     Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(act, R.string.split_saved_toast,
+                Toast.makeText(appCtx, R.string.split_saved_toast,
                     Toast.LENGTH_SHORT).show()
             }
         }
-        pendingRestart?.let { handler.postDelayed(it, 2000) }
-    }
-
-    override fun onDestroyView() {
-        pendingRestart?.let { handler.removeCallbacks(it) }
-        super.onDestroyView()
+        pendingRestart = r
+        pendingRestartHandler = h
+        h.postDelayed(r, 2000)
     }
 
     private inner class SplitAdapter : BaseAdapter() {
@@ -267,7 +298,7 @@ class SplitTunnelFragment : Fragment() {
             val pkg: TextView = row.findViewById(R.id.split_pkg)
             val check: CheckBox = row.findViewById(R.id.split_check)
             label.text = r.label
-            pkg.text = if (r.systemOnly) r.pkg + " · sistem" else r.pkg
+            pkg.text = if (r.systemOnly) r.pkg + " · " + getString(R.string.system_tag) else r.pkg
             check.setOnCheckedChangeListener(null)
             check.isChecked = bypassed.contains(r.pkg)
             check.setOnCheckedChangeListener { _, isChecked -> onToggled(r.pkg, isChecked) }

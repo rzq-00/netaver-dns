@@ -20,7 +20,21 @@ class VpnToggleReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             DnsVpnService.ACTION_STOP_VPN -> {
-                ctx.stopService(Intent(ctx, DnsVpnService::class.java))
+                // Prefer the direct ACTION_STOP service intent — the same
+                // path as the in-app power button, which provably works.
+                // stopService() alone did not take the service down on the
+                // user's device, so it stays only as a fallback.
+                if (DnsVpnService.vpnActive) {
+                    try {
+                        val i = Intent(ctx, DnsVpnService::class.java)
+                        i.action = DnsVpnService.ACTION_STOP
+                        ctx.startService(i)
+                    } catch (e: Exception) {
+                        ctx.stopService(Intent(ctx, DnsVpnService::class.java))
+                    }
+                } else {
+                    ctx.stopService(Intent(ctx, DnsVpnService::class.java))
+                }
                 showStartNotification(ctx)
             }
             DnsVpnService.ACTION_START_VPN -> {

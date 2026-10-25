@@ -38,6 +38,24 @@ object BackupManager {
         prefs.put("firewall_enabled", p.firewallEnabled())
         prefs.put("geoip_enabled", p.geoipEnabled())
         prefs.put("dns_cache", p.dnsCacheEnabled())
+        prefs.put("split_bypass", p.splitBypassRaw())
+        prefs.put("show_system_apps", p.showSystemApps())
+        prefs.put("update_auto_check", p.updateAutoCheck())
+        prefs.put("cache_min_ttl_sec", p.cacheMinTtlSec())
+        prefs.put("cache_optimistic", p.cacheOptimistic())
+        prefs.put("advanced_settings", p.advancedSettings())
+        prefs.put("cache_max_entries", p.cacheMaxEntries())
+        prefs.put("cache_flush_net", p.cacheFlushOnNetworkChange())
+        prefs.put("blocklist_check_hours", p.blocklistCheckIntervalHours())
+        prefs.put("logging_mode", p.loggingMode())
+        prefs.put("log_retention_days", p.logRetentionDays())
+        prefs.put("app_language", p.appLanguage())
+        // D1: all-time Home totals travel with the backup (restored live).
+        // N2: read the LIVE LogBus counters — the persisted Prefs copy
+        // lags by up to one flush (50 queries) while the VPN is running.
+        val totals = app.logBus().totalsAll()
+        prefs.put("total_queries_all", totals[0])
+        prefs.put("total_blocked_all", totals[1])
         root.put("prefs", prefs)
 
         val lists = JSONArray()
@@ -68,41 +86,37 @@ object BackupManager {
             val p = app.prefs()
             var lists = 0
 
+            // D2: VALIDATE FIRST, typed reads only — a key whose JSON value
+            // has the wrong type is SKIPPED, never degraded to a default
+            // that would overwrite the user's current value. Only after
+            // everything has parsed does the apply phase call setters; a
+            // throw anywhere above leaves every setting untouched.
             val prefs = root.optJSONObject("prefs")
+            val bools = HashMap<String, Boolean>()
+            val ints = HashMap<String, Int>()
+            val strs = HashMap<String, String>()
+            var importedTotals: LongArray? = null
             if (prefs != null) {
-                if (prefs.has("upstream")) p.setUpstream(clamp(prefs.optInt("upstream", 0), 0, 3))
-                if (prefs.has("dns_protocol")) p.setProtocol(prefs.optInt("dns_protocol", 1))
-                if (prefs.has("custom_upstream")) p.setCustomUpstream(prefs.optString("custom_upstream", ""))
-                if (prefs.has("fallback_upstream")) p.setFallbackUpstream(prefs.optString("fallback_upstream", "tls://1.1.1.1"))
-                if (prefs.has("upstream_list")) {
-                    val raw = prefs.optString("upstream_list", "")
-                    val list = raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (list.isNotEmpty()) p.setUpstreamList(list)
+                for (k in BOOL_KEYS) jBool(prefs, k)?.let { bools[k] = it }
+                for (k in INT_KEYS) jInt(prefs, k)?.let { ints[k] = it }
+                for (k in STR_KEYS) jStr(prefs, k)?.let { strs[k] = it }
+                val tq = jLong(prefs, "total_queries_all")
+                val tb = jLong(prefs, "total_blocked_all")
+                // N1: sanity-clamp imported totals — a hand-edited or
+                // corrupt backup must not install negative counters or
+                // blocked > queries (Home would show a negative or
+                // >100% block rate until real traffic outgrew them).
+                if (tq != null && tb != null) {
+                    val q = maxOf(0L, tq)
+                    importedTotals = longArrayOf(q, tb.coerceIn(0L, q))
                 }
-                if (prefs.has("upstream_mode")) p.setUpstreamMode(prefs.optInt("upstream_mode", 0))
-                // legacy v1.x backup without upstream_list: rebuild the list from
-                // the imported legacy primary+fallback (migration won't re-run
-                // because its flag is already set)
-                if (!prefs.has("upstream_list")
-                    && (prefs.has("upstream") || prefs.has("custom_upstream")
-                        || prefs.has("fallback_upstream"))) {
-                    p.rebuildUpstreamListFromLegacy()
-                }
-                if (prefs.has("battery_saver")) p.setBatterySaver(prefs.optBoolean("battery_saver", true))
-                if (prefs.has("block_bypass")) p.setBlockBypass(prefs.optBoolean("block_bypass", true))
-                if (prefs.has("bypass_lan")) p.setBypassLan(prefs.optBoolean("bypass_lan", true))
-                if (prefs.has("start_on_boot")) p.setStartOnBoot(prefs.optBoolean("start_on_boot", false))
-                if (prefs.has("show_notif")) p.setShowNotif(prefs.optBoolean("show_notif", true))
-                if (prefs.has("builtin_enabled")) p.setBuiltinEnabled(prefs.optBoolean("builtin_enabled", true))
-                if (prefs.has("firewall_enabled")) p.setFirewallEnabled(prefs.optBoolean("firewall_enabled", true))
-                if (prefs.has("geoip_enabled")) {
-                    val v = prefs.optBoolean("geoip_enabled", true)
-                    p.setGeoipEnabled(v)
-                    app.geoIp().setEnabled(v)
-                }
-                if (prefs.has("dns_cache")) p.setDnsCacheEnabled(prefs.optBoolean("dns_cache", true))
             }
 
+            // custom lists parsed now, applied later (D2c: the stored format
+            // is ';'-joined name|url|enabled entries, so a URL containing
+            // ';', '|' or whitespace would corrupt it — drop those entries,
+            // like empty ones)
+            var parsedLists: ArrayList<BlocklistManager.CustomList>? = null
             val arr = root.optJSONArray("custom_lists")
             if (arr != null) {
                 val out = ArrayList<BlocklistManager.CustomList>()
@@ -110,20 +124,79 @@ object BackupManager {
                     val o = arr.optJSONObject(i) ?: continue
                     val url = o.optString("url", "")
                     if (url.isEmpty()) continue
+                    if (url.contains(';') || url.contains('|') || url.any { it.isWhitespace() }) continue
                     out.add(
                         BlocklistManager.CustomList(
                             o.optString("name", url), url, o.optBoolean("enabled", true)
                         )
                     )
                 }
-                app.blocklists().saveCustomLists(out)
-                lists = out.size
+                parsedLists = out
+            }
+            val parsedRules = jStr(root, "custom_rules")
+
+            // ---- apply phase: no parsing or validation below this line ----
+            if (prefs != null) {
+                ints["upstream"]?.let { p.setUpstream(clamp(it, 0, 3)) }
+                ints["dns_protocol"]?.let { p.setProtocol(it) }
+                strs["custom_upstream"]?.let { p.setCustomUpstream(it) }
+                strs["fallback_upstream"]?.let { p.setFallbackUpstream(it) }
+                strs["upstream_list"]?.let { raw ->
+                    val list = raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (list.isNotEmpty()) p.setUpstreamList(list)
+                }
+                ints["upstream_mode"]?.let { p.setUpstreamMode(it) }
+                // legacy v1.x backup without upstream_list: rebuild the list from
+                // the imported legacy primary+fallback (migration won't re-run
+                // because its flag is already set)
+                if (!strs.containsKey("upstream_list")
+                    && (ints.containsKey("upstream") || strs.containsKey("custom_upstream")
+                        || strs.containsKey("fallback_upstream"))) {
+                    p.rebuildUpstreamListFromLegacy()
+                }
+                bools["battery_saver"]?.let { p.setBatterySaver(it) }
+                bools["block_bypass"]?.let { p.setBlockBypass(it) }
+                bools["bypass_lan"]?.let { p.setBypassLan(it) }
+                bools["start_on_boot"]?.let { p.setStartOnBoot(it) }
+                bools["show_notif"]?.let { p.setShowNotif(it) }
+                bools["builtin_enabled"]?.let { p.setBuiltinEnabled(it) }
+                bools["firewall_enabled"]?.let { p.setFirewallEnabled(it) }
+                bools["geoip_enabled"]?.let { v ->
+                    p.setGeoipEnabled(v)
+                    app.geoIp().setEnabled(v)
+                }
+                bools["dns_cache"]?.let { p.setDnsCacheEnabled(it) }
+                strs["split_bypass"]?.let { p.setSplitBypassRaw(it) }
+                bools["show_system_apps"]?.let { p.setShowSystemApps(it) }
+                bools["update_auto_check"]?.let { p.setUpdateAutoCheck(it) }
+                ints["cache_min_ttl_sec"]?.let { p.setCacheMinTtlSec(it) }
+                bools["cache_optimistic"]?.let { p.setCacheOptimistic(it) }
+                bools["advanced_settings"]?.let { p.setAdvancedSettings(it) }
+                ints["cache_max_entries"]?.let { p.setCacheMaxEntries(it) }
+                bools["cache_flush_net"]?.let { p.setCacheFlushOnNetworkChange(it) }
+                ints["blocklist_check_hours"]?.let { p.setBlocklistCheckIntervalHours(it) }
+                ints["logging_mode"]?.let { p.setLoggingMode(it) }
+                ints["log_retention_days"]?.let { p.setLogRetentionDays(it) }
+                strs["app_language"]?.let { p.setAppLanguage(it) }
+                // D1: imported all-time totals replace the live counters
+                importedTotals?.let {
+                    app.logBus().overrideAllTime(it[0], it[1])
+                    p.setTotalsSeeded()
+                }
+                // apply the imported cache policy right away
+                app.dnsCache().configure(p.cacheMinTtlSec(), p.cacheOptimistic(), p.cacheMaxEntries())
+                app.dnsCache().clear()
+                app.logBus().setLoggingMode(p.loggingMode())
             }
 
-            if (root.has("custom_rules")) {
-                val rules = root.optString("custom_rules", "")
-                p.setCustomRules(rules)
-                app.customRules().setText(rules)
+            parsedLists?.let {
+                app.blocklists().saveCustomLists(it)
+                lists = it.size
+            }
+
+            parsedRules?.let {
+                p.setCustomRules(it)
+                app.customRules().setText(it)
             }
 
             // NOTE: firewall rules are intentionally NOT imported (user request).
@@ -145,6 +218,48 @@ object BackupManager {
             return "Error: invalid backup file (" + e.message + ")"
         }
     }
+
+    // D2: typed reads — non-null ONLY when the key is present AND its JSON
+    // value has exactly the expected type (org.json's opt* getters would
+    // otherwise coerce e.g. the string "false" into a plausible value).
+    private fun jBool(o: JSONObject, key: String): Boolean? {
+        if (!o.has(key)) return null
+        val v = o.get(key)
+        return if (v is Boolean) v else null
+    }
+
+    private fun jInt(o: JSONObject, key: String): Int? {
+        if (!o.has(key)) return null
+        val v = o.get(key)
+        return if (v is Number) v.toInt() else null
+    }
+
+    private fun jLong(o: JSONObject, key: String): Long? {
+        if (!o.has(key)) return null
+        val v = o.get(key)
+        return if (v is Number) v.toLong() else null
+    }
+
+    private fun jStr(o: JSONObject, key: String): String? {
+        if (!o.has(key)) return null
+        val v = o.get(key)
+        return if (v is String) v else null
+    }
+
+    private val BOOL_KEYS = arrayOf(
+        "battery_saver", "block_bypass", "bypass_lan", "start_on_boot",
+        "show_notif", "builtin_enabled", "firewall_enabled", "geoip_enabled",
+        "dns_cache", "show_system_apps", "update_auto_check",
+        "cache_optimistic", "advanced_settings", "cache_flush_net")
+
+    private val INT_KEYS = arrayOf(
+        "upstream", "dns_protocol", "upstream_mode", "cache_min_ttl_sec",
+        "cache_max_entries", "blocklist_check_hours", "logging_mode",
+        "log_retention_days")
+
+    private val STR_KEYS = arrayOf(
+        "custom_upstream", "fallback_upstream", "upstream_list",
+        "split_bypass", "app_language")
 
     private fun clamp(v: Int, lo: Int, hi: Int): Int = maxOf(lo, minOf(hi, v))
 }

@@ -28,8 +28,14 @@ class VpnTileService : TileService() {
         super.onClick()
         when {
             DnsVpnService.vpnActive -> {
-                sendBroadcast(Intent(this, VpnToggleReceiver::class.java)
-                    .setAction(DnsVpnService.ACTION_STOP_VPN))
+                // Stop the same way the in-app power button does: a direct
+                // ACTION_STOP intent to the service. The old route (broadcast
+                // to VpnToggleReceiver -> stopService) did not take the
+                // service down on the user's device — the tile could turn
+                // the VPN on but never off.
+                val i = Intent(this, DnsVpnService::class.java)
+                i.action = DnsVpnService.ACTION_STOP
+                startService(i)
             }
             VpnService.prepare(this) == null -> {
                 sendBroadcast(Intent(this, VpnToggleReceiver::class.java)

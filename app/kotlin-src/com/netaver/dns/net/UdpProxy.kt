@@ -147,8 +147,10 @@ class UdpProxy(private val vpn: DnsVpnService) {
 
     private fun loop() {
         val sel = selector
-        val readBuf = ByteBuffer.allocate(2048)
-        val outPkt = ByteArray(2048)
+        // M9: a UDP payload can reach 65507 B — the old 2048 B buffers
+        // silently truncated large datagrams; payload max + IP/UDP headers
+        val readBuf = ByteBuffer.allocate(65536 + 28)
+        val outPkt = ByteArray(65536 + 28)
         while (running) {
             try {
                 // drain registrations first

@@ -109,11 +109,11 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
 
-                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="5dp">
+                <LinearLayout android:id="@+id/card_queries" style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginEnd="5dp" android:clickable="true" android:focusable="true">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_queries" android:textColor="@color/muted" android:textSize="11sp" />
                     <TextView android:id="@+id/stat_queries" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/text" android:textSize="20sp" android:textStyle="bold" />
                 </LinearLayout>
-                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="5dp">
+                <LinearLayout android:id="@+id/card_blocked" style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginStart="5dp" android:clickable="true" android:focusable="true">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_blocked" android:textColor="@color/muted" android:textSize="11sp" />
                     <TextView android:id="@+id/stat_blocked" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/red" android:textSize="20sp" android:textStyle="bold" />
                 </LinearLayout>
@@ -125,11 +125,11 @@
                 android:orientation="horizontal"
                 android:layout_marginTop="10dp">
 
-                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="5dp">
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginEnd="5dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_rate" android:textColor="@color/muted" android:textSize="11sp" />
                     <TextView android:id="@+id/stat_rate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0%" android:textColor="@color/accent" android:textSize="20sp" android:textStyle="bold" />
                 </LinearLayout>
-                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="5dp">
+                <LinearLayout style="@style/Card" android:orientation="vertical" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginStart="5dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_upstream" android:textColor="@color/muted" android:textSize="11sp" />
                     <TextView android:id="@+id/stat_upstream" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1.1.1.1" android:textColor="@color/text" android:textSize="16sp" android:textStyle="bold" />
                     <TextView android:id="@+id/stat_latency" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="@color/green" android:textSize="11sp" />
@@ -138,84 +138,55 @@
         </LinearLayout>
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/stats_period" android:textColor="@color/faint" android:textSize="11sp" android:gravity="center" android:paddingTop="8dp" />
-        <LinearLayout style="@style/Card" android:layout_marginTop="10dp" android:orientation="vertical">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_dns" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="6dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingBottom="4dp" />
-            <RadioGroup
-                android:id="@+id/mode_group"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-                <RadioButton android:id="@+id/mode_parallel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_parallel" android:textColor="@color/text" android:checked="true" />
-                <RadioButton android:id="@+id/mode_fastest" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_fastest" android:textColor="@color/text" />
-                <RadioButton android:id="@+id/mode_sequential" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/mode_sequential" android:textColor="@color/text" />
-            </RadioGroup>
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/mode_desc" android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="2dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_list_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
+        <LinearLayout
+            android:id="@+id/home_upstream_row"
+            style="@style/Card"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:clickable="true"
+            android:focusable="true">
             <LinearLayout
-                android:id="@+id/upstream_list_box"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:orientation="vertical" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/add_upstream_label" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="4dp" />
-            <RadioGroup
-                android:id="@+id/add_preset_group"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical">
-                <RadioButton android:id="@+id/add_cf" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Cloudflare (1.1.1.1)" android:textColor="@color/text" android:checked="true" />
-                <RadioButton android:id="@+id/add_google" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Google (8.8.8.8)" android:textColor="@color/text" />
-                <RadioButton android:id="@+id/add_quad9" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quad9 (9.9.9.9)" android:textColor="@color/text" />
-                <RadioButton android:id="@+id/add_custom" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/custom_ellipsis" android:textColor="@color/text" />
-            </RadioGroup>
-            <LinearLayout
-                android:id="@+id/add_custom_box"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone"
-                android:paddingTop="6dp">
-                <EditText
-                    android:id="@+id/add_custom_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="tls://dns.example.com or https://dns.example.com/dns-query"
-                    android:textColor="@color/text"
-                    android:textColorHint="@color/faint"
-                    android:inputType="text"
-                    android:singleLine="true" />
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/formats_hint"
-                    android:textColor="@color/faint"
-                    android:textSize="11sp"
-                    android:paddingTop="2dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_upstream" android:textColor="@color/muted" android:textSize="11sp" />
+                <TextView android:id="@+id/home_upstream_names" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="@color/text" android:textSize="15sp" android:textStyle="bold" />
             </LinearLayout>
-            <Button
-                android:id="@+id/add_upstream_btn"
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="@color/accent" android:textSize="22sp" android:layout_gravity="center_vertical" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingTop="14dp"
+            android:paddingBottom="8dp">
+
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/add"
-                android:layout_marginTop="6dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upstream_protocol" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="10dp" android:paddingBottom="6dp" />
-            <RadioGroup
-                android:id="@+id/protocol_group"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-                <RadioButton android:id="@+id/proto_dot" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DoT" android:textColor="@color/text" android:checked="true" />
-                <RadioButton android:id="@+id/proto_doh" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DoH" android:textColor="@color/text" />
-            </RadioGroup>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/protocol_hint" android:textColor="@color/faint" android:textSize="11sp" android:paddingTop="6dp" />
+                android:text="NetAver"
+                android:textColor="#cbd5e1"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
             <TextView
-                android:id="@+id/upstream_status"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text=""
-                android:textColor="@color/text"
+                android:layout_marginTop="3dp"
+                android:text="Your Network, Your Rules"
+                android:textColor="#64748b"
                 android:textSize="12sp"
-                android:paddingTop="6dp" />
+                android:textStyle="italic" />
+
+            <TextView
+                android:id="@+id/home_version_line"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

@@ -22,6 +22,15 @@ class LogBus {
     private var store: LogStore? = null // optional SQLite backing store (persistence across restarts)
     private var debugCapture: DebugCapture? = null // optional: receives a copy of every event while capturing
 
+    /** Logging mode (advanced setting): 0 full, 1 DNS only, 2 minimal. */
+    @Volatile
+    var loggingMode: Int = 0
+        private set
+
+    fun setLoggingMode(m: Int) {
+        loggingMode = m.coerceIn(0, 2)
+    }
+
     private var totalQueries = 0L
     private var totalBlocked = 0L
 
@@ -32,6 +41,13 @@ class LogBus {
     private val allBlocked = java.util.concurrent.atomic.AtomicLong(0)
     private var totalsSink: ((Long, Long) -> Unit)? = null
     private var addsSinceFlush = 0
+    // M1: while false, flushTotals() must NOT write — the in-memory counters
+    // don't include the persisted lifetime totals yet, and persisting them
+    // would destroy those totals before the app-start seed merges them.
+    @Volatile private var totalsSeeded = false
+    // A1: bumped by every clear(). The restore thread snapshots it and its
+    // seed/restore are dropped when a clear intervened meanwhile.
+    @Volatile private var clearGeneration = 0L
 
     companion object {
         private const val MAX_DNS = 1000
@@ -56,11 +72,12 @@ class LogBus {
      */
     @Synchronized
     fun restore(dns: List<Entries.DnsEntry>, conns: List<Entries.ConnEntry>) {
+        // D4: restored rows only refill the rings — they must NOT feed the
+        // per-process session counters (totals() has no UI consumer; Home
+        // shows the all-time counters, which are seeded separately).
         for (e in dns) {
             if (dnsLog.size >= MAX_DNS) dnsLog.pollFirst()
             dnsLog.addLast(e)
-            totalQueries++
-            if (e.blocked) totalBlocked++
         }
         for (e in conns) {
             if (connLog.size >= MAX_CONN) connLog.pollFirst()
@@ -69,26 +86,42 @@ class LogBus {
         notifyChanged()
     }
 
+    /**
+     * A1: [restore] gated on the clear generation — returns false and does
+     * nothing when a clear() happened since [gen] was captured, so a late
+     * app-start restore never resurrects logs the user just cleared.
+     */
+    @Synchronized
+    fun restoreIfCurrent(gen: Long, dns: List<Entries.DnsEntry>, conns: List<Entries.ConnEntry>): Boolean {
+        if (gen != clearGeneration) return false
+        restore(dns, conns)
+        return true
+    }
+
     @Synchronized
     fun addDns(e: Entries.DnsEntry) {
-        if (dnsLog.size >= MAX_DNS) dnsLog.pollFirst()
-        dnsLog.addLast(e)
+        // Counters ALWAYS count (Home totals must stay truthful);
+        // the logging mode only gates what gets recorded.
         totalQueries++
         if (e.blocked) totalBlocked++
         allQueries.incrementAndGet()
         if (e.blocked) allBlocked.incrementAndGet()
         if (++addsSinceFlush >= 50) flushTotals()
+        debugCapture?.onDns(e) // an active debug capture always sees everything
+        if (loggingMode == 2 && !e.blocked) return // minimal: blocked only
+        if (dnsLog.size >= MAX_DNS) dnsLog.pollFirst()
+        dnsLog.addLast(e)
         store?.saveDns(e)
-        debugCapture?.onDns(e)
         notifyChanged()
     }
 
     @Synchronized
     fun addConn(e: Entries.ConnEntry) {
+        debugCapture?.onConn(e)
+        if (loggingMode >= 1) return // DNS only / minimal: no connection log
         if (connLog.size >= MAX_CONN) connLog.pollFirst()
         connLog.addLast(e)
         store?.saveConn(e)
-        debugCapture?.onConn(e)
         notifyChanged()
     }
 
@@ -144,8 +177,9 @@ class LogBus {
             if (d.app == app) {
                 val match = when (filter) {
                     1 -> d.blocked
-                    2 -> !d.blocked
+                    2 -> !d.blocked && !d.isBypass
                     3 -> d.isBypass
+                    4 -> d.fromCache
                     else -> true
                 }
                 if (match) out.add(d)
@@ -214,11 +248,47 @@ class LogBus {
         totalsSink = sink
     }
 
-    /** Set the all-time counters (app start seeding). Does not recount restores. */
+    /** Current clear generation (A1): snapshot before async restore work. */
+    @Synchronized
+    fun clearGeneration(): Long = clearGeneration
+
+    /**
+     * Seed the all-time counters (app start). M1: ADDITIVE and one-shot —
+     * queries already counted live are kept, the persisted totals are merged
+     * in, and the merged value is persisted at once. A late or repeated seed
+     * can no longer overwrite the live counters.
+     */
     @Synchronized
     fun seedAllTime(q: Long, b: Long) {
+        if (totalsSeeded) return
+        allQueries.addAndGet(q)
+        allBlocked.addAndGet(b)
+        totalsSeeded = true
+        flushTotals()
+    }
+
+    /**
+     * A1: [seedAllTime] gated on the clear generation — returns false and
+     * does nothing when a clear() happened since [gen] was captured.
+     */
+    @Synchronized
+    fun seedAllTimeIfCurrent(gen: Long, q: Long, b: Long): Boolean {
+        if (gen != clearGeneration) return false
+        seedAllTime(q, b)
+        return true
+    }
+
+    /**
+     * D1: replace the all-time counters with imported totals (backup
+     * restore). Marks them seeded so they persist at once via the sink and
+     * the app-start seed never overwrites them.
+     */
+    @Synchronized
+    fun overrideAllTime(q: Long, b: Long) {
         allQueries.set(q)
         allBlocked.set(b)
+        totalsSeeded = true
+        flushTotals()
     }
 
     fun totalsAll(): LongArray = longArrayOf(allQueries.get(), allBlocked.get())
@@ -226,16 +296,26 @@ class LogBus {
     /** Persist the all-time counters through the sink (battery-throttled by addDns). */
     @Synchronized
     fun flushTotals() {
+        // M1: before seeding, the stored lifetime totals must survive —
+        // the in-memory counters don't include them yet.
+        if (!totalsSeeded) return
         totalsSink?.invoke(allQueries.get(), allBlocked.get())
         addsSinceFlush = 0
     }
 
     @Synchronized
     fun clear() {
+        clearGeneration++ // A1: invalidate any in-flight app-start restore
         dnsLog.clear()
         connLog.clear()
         totalQueries = 0
         totalBlocked = 0
+        // Clear Logs also resets the statistics (his order 2026-10-23):
+        // the all-time Home totals go back to 0 and are persisted at once.
+        allQueries.set(0)
+        allBlocked.set(0)
+        totalsSeeded = true // M1: unblock flushTotals so the zeros persist
+        flushTotals()
         store?.clear()
         notifyChanged()
     }

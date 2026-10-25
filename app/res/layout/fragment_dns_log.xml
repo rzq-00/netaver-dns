@@ -15,17 +15,18 @@
         android:textStyle="bold"
         android:paddingBottom="8dp" />
 
-    <RadioGroup
-        android:id="@+id/dns_filter_group"
+    <LinearLayout
+        android:id="@+id/dns_filter_chips"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingBottom="4dp">
-        <RadioButton android:id="@+id/f_all" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_all" android:textColor="@color/text" android:checked="true" />
-        <RadioButton android:id="@+id/f_blocked" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_blocked" android:textColor="@color/text" />
-        <RadioButton android:id="@+id/f_allowed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_allowed" android:textColor="@color/text" />
-        <RadioButton android:id="@+id/f_bypass" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/filter_bypass" android:textColor="@color/text" />
-    </RadioGroup>
+        android:paddingBottom="8dp">
+        <TextView android:id="@+id/chip_all" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:paddingTop="7dp" android:paddingBottom="7dp" android:text="@string/filter_all" android:textSize="12.5sp" />
+        <TextView android:id="@+id/chip_blocked" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:gravity="center" android:paddingTop="7dp" android:paddingBottom="7dp" android:text="@string/filter_blocked" android:textSize="12.5sp" />
+        <TextView android:id="@+id/chip_allowed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:gravity="center" android:paddingTop="7dp" android:paddingBottom="7dp" android:text="@string/filter_allowed" android:textSize="12.5sp" />
+        <TextView android:id="@+id/chip_bypass" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:gravity="center" android:paddingTop="7dp" android:paddingBottom="7dp" android:text="@string/filter_bypass" android:textSize="12.5sp" />
+        <TextView android:id="@+id/chip_cache" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:gravity="center" android:paddingTop="7dp" android:paddingBottom="7dp" android:text="@string/filter_cache" android:textSize="12.5sp" />
+    </LinearLayout>
 
     <EditText
         android:id="@+id/dns_search"

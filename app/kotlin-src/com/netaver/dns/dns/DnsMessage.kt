@@ -64,15 +64,19 @@ class DnsMessage private constructor() {
                 b.short // ARCOUNT
                 if (!isQuery || qdcount != 1) return m
                 val name = StringBuilder()
-                // QNAME with compression-pointer safety
+                // QNAME with compression-pointer safety. E6: pointer jumps
+                // and label steps are counted separately — the old single
+                // counter rejected legal names with more than 16 labels.
                 var jumps = 0
+                var steps = 0
                 // qtype/qclass follow the POINTER (original offset + 2), not the target
                 var afterPtr = -1
                 while (true) {
-                    if (!b.hasRemaining() || jumps++ > 16) return m
+                    if (!b.hasRemaining() || steps++ > 128) return m
                     val lbl = b.get().toInt() and 0xFF
                     if (lbl == 0) break
                     if (lbl and 0xC0 == 0xC0) {
+                        if (++jumps > 16) return m
                         if (!b.hasRemaining()) return m
                         val ptr = ((lbl and 0x3F) shl 8) or (b.get().toInt() and 0xFF)
                         if (ptr >= len) return m
@@ -153,6 +157,28 @@ class DnsMessage private constructor() {
             }
         }
 
+        /**
+         * Build a truncated response (TC set, question echoed, no answers):
+         * tells the client to retry over TCP. Used when the real answer
+         * cannot fit into a single UDP packet.
+         */
+        @JvmStatic
+        fun buildTruncatedResponse(q: DnsMessage): ByteArray? {
+            return try {
+                val out = ByteArrayOutputStream()
+                writeShort(out, q.id)
+                writeShort(out, 0x8380) // QR=1, TC=1, RD=1, RA=1, NOERROR
+                writeShort(out, 1)      // QDCOUNT
+                writeShort(out, 0)      // ANCOUNT
+                writeShort(out, 0)
+                writeShort(out, 0)
+                writeQuestion(out, q)
+                out.toByteArray()
+            } catch (e: Exception) {
+                null
+            }
+        }
+
         private fun writeQuestion(out: ByteArrayOutputStream, q: DnsMessage) {
             // q.qname!! : null qname throws (caught by caller -> null), same as Java
             for (label in splitDot(q.qname!!)) {
@@ -219,8 +245,12 @@ class DnsMessage private constructor() {
         /** Skip a DNS name (labels or compression pointer). Returns new offset or -1. */
         private fun skipName(b: ByteArray, len: Int, off: Int): Int {
             var o = off
-            var jumps = 0
-            while (o < len && jumps++ < 16) {
+            // B2: bound total label STEPS (128), not steps-plus-jumps at
+            // 16 — a legal name with many labels must not fail the skip
+            // (same discipline as parseQuery after E6). Pointers still
+            // return immediately, as before.
+            var steps = 0
+            while (o < len && steps++ <= 128) {
                 val lbl = b[o].toInt() and 0xFF
                 if (lbl == 0) return o + 1
                 if (lbl and 0xC0 == 0xC0) return o + 2
@@ -237,6 +267,11 @@ class DnsMessage private constructor() {
         fun minTtl(resp: ByteArray?, len: Int): Long {
             try {
                 if (resp == null || len < 12) return -1
+                // E8: only complete responses are cacheable — QR clear means
+                // this is not a response at all, TC set means the answer was
+                // truncated (caching it would serve a partial answer as whole)
+                if (resp[2].toInt() and 0x80 == 0) return -1 // QR bit
+                if (resp[2].toInt() and 0x02 != 0) return -1 // TC bit
                 if (resp[3].toInt() and 0x0F != 0) return -1 // rcode != NOERROR
                 val qdcount = u16(resp, 4)
                 val ancount = u16(resp, 6)

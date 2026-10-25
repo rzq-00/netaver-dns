@@ -158,7 +158,13 @@ class Updater(private val act: Activity) {
                         dlg.dismiss()
                         dest.delete()
                         if (good) {
-                            showReadyDialog(info)
+                            // A2 fix: the activity may be finished/destroyed
+                            // (e.g. rotated) by now; showing the ready dialog
+                            // would throw BadToken. The verified APK is
+                            // already in Downloads — only the dialog is skipped.
+                            if (!act.isFinishing && !act.isDestroyed) {
+                                showReadyDialog(info)
+                            }
                         } else {
                             Toast.makeText(act, R.string.update_sig_bad,
                                 Toast.LENGTH_LONG).show()

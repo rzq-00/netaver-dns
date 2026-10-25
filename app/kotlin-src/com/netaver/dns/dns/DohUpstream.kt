@@ -3,6 +3,7 @@ package com.netaver.dns.dns
 import android.net.VpnService
 
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -68,7 +69,19 @@ class DohUpstream : TlsUpstream {
                 val hex = readLine(input).trim().split(";")[0]
                 val n = hex.toIntOrNull(16)
                     ?: throw IOException("DoH: bad chunk size")
-                if (n == 0) { readLine(input); break }
+                if (n == 0) {
+                    // B8: consume trailer headers after the terminal
+                    // chunk (RFC 7230: trailers end at a blank line).
+                    // Reading exactly one line left trailer bytes in the
+                    // stream, desyncing the next response parsed on this
+                    // persistent connection.
+                    try {
+                        while (readLine(input).isNotEmpty()) { /* trailers ignored */ }
+                    } catch (e: EOFException) {
+                        // body already complete; the stream is done either way
+                    }
+                    break
+                }
                 // cap: same bound as the Content-Length path (no 2GB chunk OOM)
                 if (n > 65535 || body.size() + n > 65535)
                     throw IOException("DoH chunk too large")

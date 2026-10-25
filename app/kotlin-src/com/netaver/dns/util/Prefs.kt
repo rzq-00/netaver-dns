@@ -243,8 +243,10 @@ class Prefs(ctx: Context) {
         sp.edit().putString(KEY_UPSTREAM_LIST, clean.joinToString(";")).apply()
     }
 
-    /** 0=parallel (race, fastest wins), 1=fastest (lowest latency EMA), 2=sequential (ordered failover). */
-    fun upstreamMode(): Int = sp.getInt(KEY_UPSTREAM_MODE, MODE_PARALLEL)
+    /** 0=parallel (race, fastest wins), 1=fastest (lowest latency EMA), 2=sequential (ordered failover).
+     *  N4: getter clamps to the setter's range, like loggingMode (D5) —
+     *  a corrupt stored value must not reach mode dispatch raw. */
+    fun upstreamMode(): Int = sp.getInt(KEY_UPSTREAM_MODE, MODE_PARALLEL).coerceIn(0, 2)
 
     fun setUpstreamMode(m: Int) {
         sp.edit().putInt(KEY_UPSTREAM_MODE, m.coerceIn(0, 2)).apply()
@@ -403,6 +405,65 @@ class Prefs(ctx: Context) {
     fun dnsCacheEnabled(): Boolean = sp.getBoolean(KEY_DNS_CACHE, true)
     fun setDnsCacheEnabled(v: Boolean) {
         sp.edit().putBoolean(KEY_DNS_CACHE, v).apply()
+    }
+
+    /** Minimum-TTL floor for the DNS cache, in seconds (0 = follow the
+     *  provider's TTL as-is). User-configurable in Settings.
+     *  N4: getter clamps to the setter's range, like loggingMode (D5). */
+    fun cacheMinTtlSec(): Int = sp.getInt("cache_min_ttl_sec", 600).coerceIn(0, 86400)
+    fun setCacheMinTtlSec(v: Int) {
+        sp.edit().putInt("cache_min_ttl_sec", v.coerceIn(0, 86400)).apply()
+    }
+
+    /** Optimistic caching: serve expired answers instantly, refresh behind. */
+    fun cacheOptimistic(): Boolean = sp.getBoolean("cache_optimistic", true)
+    fun setCacheOptimistic(v: Boolean) {
+        sp.edit().putBoolean("cache_optimistic", v).apply()
+    }
+
+    /** Master toggle for the Advanced settings section (access key only:
+     *  hiding the section never disables a feature that is on). */
+    fun advancedSettings(): Boolean = sp.getBoolean("advanced_settings", false)
+    fun setAdvancedSettings(v: Boolean) {
+        sp.edit().putBoolean("advanced_settings", v).apply()
+    }
+
+    /** Maximum number of answers kept in the DNS cache.
+     *  N4: getter clamps to the setter's range, like loggingMode (D5). */
+    fun cacheMaxEntries(): Int = sp.getInt("cache_max_entries", 5000).coerceIn(100, 10000)
+    fun setCacheMaxEntries(v: Int) {
+        sp.edit().putInt("cache_max_entries", v.coerceIn(100, 10000)).apply()
+    }
+
+    /** Flush the DNS cache whenever the network reconnects/changes. */
+    fun cacheFlushOnNetworkChange(): Boolean = sp.getBoolean("cache_flush_net", false)
+    fun setCacheFlushOnNetworkChange(v: Boolean) {
+        sp.edit().putBoolean("cache_flush_net", v).apply()
+    }
+
+    /** Minimum gap between automatic blocklist checks, in hours.
+     *  N4: getter clamps to the setter's range, like loggingMode (D5). */
+    fun blocklistCheckIntervalHours(): Int = sp.getInt("blocklist_check_hours", 1).coerceIn(1, 168)
+    fun setBlocklistCheckIntervalHours(v: Int) {
+        sp.edit().putInt("blocklist_check_hours", v.coerceIn(1, 168)).apply()
+    }
+
+    /** Logging mode: 0 = full (DNS + connections), 1 = DNS only,
+     *  2 = minimal (blocked queries only). Counters always count.
+     *  D5: getter clamps — a corrupt/out-of-range stored value must not
+     *  reach array indexing in Settings. */
+    fun loggingMode(): Int = sp.getInt("logging_mode", 0).coerceIn(0, 2)
+    fun setLoggingMode(v: Int) {
+        sp.edit().putInt("logging_mode", v.coerceIn(0, 2)).apply()
+    }
+
+    /** How many days of logs the store keeps before pruning.
+     *  N4: getter clamps to the setter's range, like loggingMode (D5) —
+     *  a corrupt stored value ≤ 0 would otherwise make the next prune
+     *  compute a cutoff at/after now and delete the ENTIRE log DB. */
+    fun logRetentionDays(): Int = sp.getInt("log_retention_days", 7).coerceIn(1, 90)
+    fun setLogRetentionDays(v: Int) {
+        sp.edit().putInt("log_retention_days", v.coerceIn(1, 90)).apply()
     }
 
     fun firewallRulesRaw(): String = sp.getString(KEY_FIREWALL_RULES, "") ?: ""

@@ -23,7 +23,12 @@ class Entries private constructor() {
         @JvmField @Volatile var countryCode: String = "",
         @JvmField @Volatile var matchInfo: String = "", // e.g. "Custom rule", "Hagezi Pro", "Upstream 1.1.1.1"
         @JvmField @Volatile var isBypass: Boolean = false // bypass attempt (e.g. hardcoded DoT server)
-    )
+    ) {
+        /** True when the answer was served from the local DNS cache
+         *  ("Cache", "Cache (offline)", or "Cache (stale)"). */
+        val fromCache: Boolean
+            get() = matchInfo.startsWith("Cache")
+    }
 
     data class ConnEntry @JvmOverloads constructor(
         @JvmField val time: Long,

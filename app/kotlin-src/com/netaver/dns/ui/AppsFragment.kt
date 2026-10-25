@@ -19,6 +19,7 @@ import com.netaver.dns.log.Entries
 import com.netaver.dns.util.FirewallManager
 
 import java.util.ArrayList
+import java.util.Locale
 
 /**
  * Per-app network activity + firewall switches (RethinkDNS-style).
@@ -183,8 +184,8 @@ class AppsFragment : Fragment() {
 
         companion object {
             private fun fmtBytes(b: Long): String {
-                if (b >= (1 shl 20)) return String.format("%.1f MB", b / (1 shl 20).toFloat())
-                if (b >= (1 shl 10)) return String.format("%.0f KB", b / (1 shl 10).toFloat())
+                if (b >= (1 shl 20)) return String.format(Locale.US, "%.1f MB", b / (1 shl 20).toFloat())
+                if (b >= (1 shl 10)) return String.format(Locale.US, "%.0f KB", b / (1 shl 10).toFloat())
                 return "$b B"
             }
         }

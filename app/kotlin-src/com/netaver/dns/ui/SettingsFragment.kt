@@ -16,6 +16,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -70,8 +71,8 @@ class SettingsFragment : Fragment() {
             val f = act.getDatabasePath("netaver_logs.db")
             val bytes = if (f.exists()) f.length() else 0L
             val mb = bytes / (1024.0 * 1024.0)
-            val size = if (mb < 0.1) String.format("%d KB", bytes / 1024)
-            else String.format("%.1f MB", mb)
+            val size = if (mb < 0.1) String.format(Locale.US, "%d KB", bytes / 1024)
+            else String.format(Locale.US, "%.1f MB", mb)
             val app = act.application as NetAverApp
             val dnsN = app.logStore().dnsCount()
             val connN = app.logStore().connCount()
@@ -129,6 +130,138 @@ class SettingsFragment : Fragment() {
         }
         bind(v, R.id.sw_dnscache, p.dnsCacheEnabled(), p::setDnsCacheEnabled)
 
+        // ---- DNS cache section ----
+        // stored-answer count on the Clear cache row
+        val cacheCount: TextView = v.findViewById(R.id.cache_count)
+        cacheCount.text = getString(R.string.cache_entries_fmt, app.dnsCache().size())
+        v.findViewById<View>(R.id.set_cache_clear).setOnClickListener {
+            app.dnsCache().clear()
+            cacheCount.text = getString(R.string.cache_entries_fmt, 0)
+            Toast.makeText(act, R.string.cache_cleared, Toast.LENGTH_SHORT).show()
+        }
+        bind(v, R.id.sw_optimistic, p.cacheOptimistic()) { checked ->
+            p.setCacheOptimistic(checked)
+            app.dnsCache().configure(p.cacheMinTtlSec(), p.cacheOptimistic(), p.cacheMaxEntries())
+        }
+        // minimum TTL override: manual seconds, with the staleness warning
+        val minTtlValue: TextView = v.findViewById(R.id.cache_min_ttl_value)
+        fun minTtlLabel(): String =
+            if (p.cacheMinTtlSec() <= 0) getString(R.string.cache_value_off)
+            else getString(R.string.cache_seconds_fmt, p.cacheMinTtlSec())
+        minTtlValue.text = minTtlLabel()
+        v.findViewById<View>(R.id.set_cache_min_ttl).setOnClickListener {
+            val input = EditText(act)
+            input.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            input.setText(p.cacheMinTtlSec().toString())
+            input.setSelection(input.text.length)
+            AlertDialog.Builder(act)
+                .setTitle(R.string.cache_min_ttl)
+                .setMessage(R.string.cache_min_ttl_warn)
+                .setView(input)
+                .setPositiveButton(R.string.save) { _, _ ->
+                    val sec = input.text.toString().trim().toIntOrNull()
+                    if (sec == null || sec < 0 || sec > 86400) {
+                        Toast.makeText(act, R.string.cache_min_ttl_invalid, Toast.LENGTH_LONG).show()
+                    } else {
+                        p.setCacheMinTtlSec(sec)
+                        app.dnsCache().configure(p.cacheMinTtlSec(), p.cacheOptimistic(), p.cacheMaxEntries())
+                        app.dnsCache().clear() // stored answers were cached under the old floor
+                        minTtlValue.text = minTtlLabel()
+                        cacheCount.text = getString(R.string.cache_entries_fmt, 0)
+                    }
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
+        // ---- Advanced settings (access key: hiding never disables a feature) ----
+        val advBody: View = v.findViewById(R.id.advanced_body)
+        val advSw: Switch = v.findViewById(R.id.sw_advanced)
+        advSw.isChecked = p.advancedSettings()
+        advBody.visibility = if (p.advancedSettings()) View.VISIBLE else View.GONE
+        advSw.setOnCheckedChangeListener { _, checked ->
+            p.setAdvancedSettings(checked)
+            advBody.visibility = if (checked) View.VISIBLE else View.GONE
+        }
+        bind(v, R.id.sw_cache_flush, p.cacheFlushOnNetworkChange(), p::setCacheFlushOnNetworkChange)
+        bind(v, R.id.sw_show_system, p.showSystemApps(), p::setShowSystemApps)
+
+        // maximum cache size (entries)
+        val cacheMaxValue: TextView = v.findViewById(R.id.cache_max_value)
+        val cacheMaxChoices = intArrayOf(500, 1000, 2000, 5000)
+        cacheMaxValue.text = getString(R.string.cache_entries_value_fmt, p.cacheMaxEntries())
+        v.findViewById<View>(R.id.set_cache_max).setOnClickListener {
+            // U4: include the current value when an import set a non-preset
+            // size (e.g. 3000) — otherwise indexOf misses it and the dialog
+            // preselects 500 while the row label shows the real value.
+            val choices = (cacheMaxChoices.toList() + p.cacheMaxEntries()).distinct().sorted()
+            val labels = choices.map {
+                getString(R.string.cache_entries_value_fmt, it)
+            }.toTypedArray()
+            val cur = choices.indexOf(p.cacheMaxEntries()).coerceAtLeast(0)
+            showChoice(R.string.cache_max_size, labels, cur) { which ->
+                p.setCacheMaxEntries(choices[which])
+                app.dnsCache().configure(p.cacheMinTtlSec(), p.cacheOptimistic(), p.cacheMaxEntries())
+                cacheMaxValue.text = getString(R.string.cache_entries_value_fmt, p.cacheMaxEntries())
+            }
+        }
+
+        // blocklist check interval (hours)
+        val blistValue: TextView = v.findViewById(R.id.blist_interval_value)
+        val blistChoices = intArrayOf(1, 6, 12, 24)
+        fun blistLabel(h: Int): String =
+            if (h == 1) getString(R.string.blist_hour_one) else getString(R.string.blist_hours_fmt, h)
+        blistValue.text = blistLabel(p.blocklistCheckIntervalHours())
+        v.findViewById<View>(R.id.set_blist_interval).setOnClickListener {
+            // U-N2: same U4 treatment as the cache-size dialog — include
+            // the current value when an import set a non-preset interval
+            // (e.g. 3h), or indexOf misses it and the dialog preselects
+            // 1h while the row label shows the real value.
+            val choices = (blistChoices.toList() + p.blocklistCheckIntervalHours()).distinct().sorted()
+            val labels = choices.map { blistLabel(it) }.toTypedArray()
+            val cur = choices.indexOf(p.blocklistCheckIntervalHours()).coerceAtLeast(0)
+            showChoice(R.string.blist_interval, labels, cur) { which ->
+                p.setBlocklistCheckIntervalHours(choices[which])
+                blistValue.text = blistLabel(p.blocklistCheckIntervalHours())
+            }
+        }
+
+        // logging mode (full / DNS only / minimal)
+        val logModeValue: TextView = v.findViewById(R.id.logging_mode_value)
+        val logModeLabels = arrayOf(
+            getString(R.string.logging_mode_full),
+            getString(R.string.logging_mode_dns),
+            getString(R.string.logging_mode_minimal))
+        logModeValue.text = logModeLabels[p.loggingMode()]
+        v.findViewById<View>(R.id.set_logging_mode).setOnClickListener {
+            showChoice(R.string.logging_mode, logModeLabels, p.loggingMode()) { which ->
+                p.setLoggingMode(which)
+                app.logBus().setLoggingMode(which)
+                logModeValue.text = logModeLabels[which]
+            }
+        }
+
+        // log retention (days)
+        val retentionValue: TextView = v.findViewById(R.id.log_retention_value)
+        val retentionChoices = intArrayOf(1, 3, 7, 30)
+        fun retentionLabel(d: Int): String =
+            if (d == 1) getString(R.string.retention_day_one)
+            else getString(R.string.retention_days_fmt, d)
+        retentionValue.text = retentionLabel(p.logRetentionDays())
+        v.findViewById<View>(R.id.set_log_retention).setOnClickListener {
+            // U-N2: same U4 treatment as the cache-size dialog — include
+            // the current value when an import set a non-preset
+            // retention (e.g. 5 days), or the dialog preselects 1 day
+            // while the row label shows the real value.
+            val choices = (retentionChoices.toList() + p.logRetentionDays()).distinct().sorted()
+            val labels = choices.map { retentionLabel(it) }.toTypedArray()
+            val cur = choices.indexOf(p.logRetentionDays()).coerceAtLeast(0)
+            showChoice(R.string.log_retention, labels, cur) { which ->
+                p.setLogRetentionDays(choices[which])
+                retentionValue.text = retentionLabel(p.logRetentionDays())
+            }
+        }
+
         // language picker (bilingual EN/ID, follows system by default)
         val langValue: TextView = v.findViewById(R.id.language_value)
         fun langLabel(): String = when (p.appLanguage()) {
@@ -157,16 +290,28 @@ class SettingsFragment : Fragment() {
 
         val clear: Button = v.findViewById(R.id.btn_clear_logs)
         clear.setOnClickListener {
-            AlertDialog.Builder(act)
+            // Warning dialog: clearing logs now also resets the statistics,
+            // so the current Home totals are shown before confirming.
+            val t = app.logBus().totalsAll()
+            val numFmt = java.text.NumberFormat.getIntegerInstance()
+            val msg = getString(
+                R.string.clear_logs_message_fmt,
+                numFmt.format(t[0]), numFmt.format(t[1]))
+            val dlg = AlertDialog.Builder(act)
                 .setTitle(R.string.clear_logs)
-                .setMessage(R.string.clear_logs_desc)
-                .setPositiveButton(android.R.string.ok) { _, _ ->
+                .setMessage(msg)
+                .setPositiveButton(R.string.clear_logs_action) { _, _ ->
                     app.logBus().clear()
                     updateLogSize()
                     Toast.makeText(act, R.string.logs_cleared, Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton(android.R.string.cancel, null)
-                .show()
+                .create()
+            dlg.setOnShowListener {
+                dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setTextColor(0xFFF26D6D.toInt())
+            }
+            dlg.show()
         }
 
         val export: Button = v.findViewById(R.id.btn_export_logs)
@@ -174,11 +319,6 @@ class SettingsFragment : Fragment() {
 
         logSizeTv = v.findViewById(R.id.log_size_label)
         updateLogSize()
-
-        setupCollapsible(v, p, R.id.logs_header, R.id.logs_body,
-            p.logsCollapsed(), p::setLogsCollapsed, getString(R.string.section_logs))
-        setupCollapsible(v, p, R.id.backup_header, R.id.backup_body,
-            p.backupCollapsed(), p::setBackupCollapsed, getString(R.string.section_backup))
 
         setupDebugButton(v, app)
 
@@ -266,9 +406,19 @@ class SettingsFragment : Fragment() {
                     if (buf.size() > 2_000_000) throw Exception("file too large")
                 }
                 val app = act.application as NetAverApp
+                val langBefore = app.prefs().appLanguage()
                 val result = BackupManager.importJson(app,
                     buf.toString(StandardCharsets.UTF_8.name()))
                 Toast.makeText(act, result, Toast.LENGTH_LONG).show()
+                // imported upstream settings take effect right away:
+                // restart the VPN once when it is running (same rule as the Upstream tab)
+                if (!result.startsWith("Error:")) {
+                    val ma = act as? MainActivity
+                    if (ma != null && ma.isVpnRunning()) ma.restartVpn()
+                    // M7 follow-up: an imported language applies live too —
+                    // recreate like the language picker does
+                    if (app.prefs().appLanguage() != langBefore) act.recreate()
+                }
             }
         } catch (e: Exception) {
             Toast.makeText(act, getString(R.string.import_failed_fmt, e.message),
@@ -327,6 +477,14 @@ class SettingsFragment : Fragment() {
                 Toast.makeText(activity,
                     R.string.debug_started,
                     Toast.LENGTH_LONG).show()
+                // U-N5: (re)arm the elapsed-time ticker — the chain
+                // stops itself whenever no capture is running, so
+                // without this a Start from Settings left the button
+                // label frozen at "0:00" while the capture ran.
+                debugTicker?.let {
+                    debugHandler.removeCallbacks(it)
+                    debugHandler.postDelayed(it, 1000)
+                }
             }
             refreshDebugBtn(btn, app)
         }
@@ -421,6 +579,24 @@ class SettingsFragment : Fragment() {
     override fun onDestroyView() {
         debugTicker?.let { debugHandler.removeCallbacks(it) }
         super.onDestroyView()
+    }
+
+    /** Single-choice dialog used by the advanced value rows. */
+    private fun showChoice(
+        titleRes: Int,
+        labels: Array<String>,
+        current: Int,
+        onPick: (Int) -> Unit
+    ) {
+        val act = activity ?: return
+        AlertDialog.Builder(act)
+            .setTitle(titleRes)
+            .setSingleChoiceItems(labels, current) { d, which ->
+                onPick(which)
+                d.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun bind(root: View, id: Int, initial: Boolean, setter: (Boolean) -> Unit) {

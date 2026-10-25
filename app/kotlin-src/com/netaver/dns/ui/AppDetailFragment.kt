@@ -43,7 +43,9 @@ class AppDetailFragment : Fragment() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var ticker: Runnable
     private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
-    private var filter = 0 // 0=all 1=blocked 2=allowed 3=bypass (mirip DNS Log)
+    private var filter = 0 // 0=all 1=blocked 2=allowed 3=bypass 4=cache (mirip DNS Log)
+    private var chipViews: List<TextView> = emptyList()
+    private var lastRenderedSig: String? = null // U6: signature of what refreshNow last rendered
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -52,6 +54,10 @@ class AppDetailFragment : Fragment() {
     ): View {
         val v = inflater.inflate(R.layout.fragment_app_detail, container, false)
         appName = if (arguments != null) arguments!!.getString(ARG_APP, "") else ""
+        // U-N4: rotation must not silently reset the picked filter chip
+        if (savedInstanceState != null) {
+            filter = savedInstanceState.getInt(STATE_FILTER, filter)
+        }
         icon = v.findViewById(R.id.detail_icon)
         name = v.findViewById(R.id.detail_name)
         stats = v.findViewById(R.id.detail_stats)
@@ -66,13 +72,21 @@ class AppDetailFragment : Fragment() {
         val back: Button = v.findViewById(R.id.detail_back)
         back.setOnClickListener { fragmentManager?.popBackStack() }
 
-        val rg: RadioGroup = v.findViewById(R.id.detail_filter_group)
-        rg.setOnCheckedChangeListener { _, checkedId ->
-            filter = if (checkedId == R.id.detail_f_blocked) 1
-                else if (checkedId == R.id.detail_f_allowed) 2
-                else if (checkedId == R.id.detail_f_bypass) 3 else 0
-            refreshNow()
+        // Filter chips (pill bar): one row of five equal-width toggles;
+        // chip order matches the filter values 0..4 (mirrors DNS Log).
+        val chipIds = intArrayOf(R.id.dchip_all, R.id.dchip_blocked, R.id.dchip_allowed,
+            R.id.dchip_bypass, R.id.dchip_cache)
+        chipViews = chipIds.map { v.findViewById<TextView>(it) }
+        chipViews.forEachIndexed { idx, tv ->
+            tv.setOnClickListener {
+                if (filter != idx) {
+                    filter = idx
+                    renderChips()
+                    refreshNow()
+                }
+            }
         }
+        renderChips()
 
         icon.text = if (appName.isEmpty()) "?" else appName.substring(0, 1).uppercase()
         name.text = appName
@@ -95,6 +109,22 @@ class AppDetailFragment : Fragment() {
         handler.removeCallbacks(ticker)
     }
 
+    // U-N4: persist the filter chip across rotation (see onCreateView)
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_FILTER, filter)
+    }
+
+
+    private fun renderChips() {
+        chipViews.forEachIndexed { i, tv ->
+            val on = i == filter
+            tv.setBackgroundResource(if (on) R.drawable.chip_on else R.drawable.chip_off)
+            tv.setTextColor(if (on) 0xFFFFFFFF.toInt() else 0xFF8A94B0.toInt())
+            tv.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+    }
+
     private fun refreshNow() {
         val act = activity ?: return
         val app = act.application as NetAverApp
@@ -110,6 +140,40 @@ class AppDetailFragment : Fragment() {
         }
         val uid = stat?.uid ?: -100
         val blocked = uid >= 0 && fw.isBlocked(uid)
+
+        // Both lists are fetched up front (cheap in-memory scans) so the
+        // U6 change guard can decide before any view gets inflated.
+        // DNS queries: the filter is applied while collecting (up to 100
+        // MATCHING entries), not after taking the newest N — busy apps no
+        // longer crowd out their blocked rows.
+        val dns = app.logBus().dnsForApp(appName, 100, filter)
+        // Connections (same filter; the section is hidden under Bypass and
+        // Cache, which are DNS-only concepts).
+        val conns = app.logBus().connsForApp(appName, 100, if (filter == 3 || filter == 4) 0 else filter)
+
+        // U6: the 3 s ticker used to re-inflate up to 200 rows on every
+        // tick. Skip the rebuild when a signature of everything rendered
+        // below is unchanged: filter, stat counters, firewall state, list
+        // sizes and edge timestamps. Every row's country code rides
+        // along (U-N1) because GeoIP fills them in asynchronously, in
+        // place, after the rows first appear — sampling only the newest
+        // row left late flags on older rows invisible while the page
+        // sat idle. The firewall switch is safe under the guard: its
+        // own toggle changes `blocked`, which is part of the signature,
+        // so a toggle always triggers a real rebuild.
+        val sig = buildString {
+            append(filter).append('|').append(uid).append('|').append(blocked)
+            append('|').append(stat?.queries).append(',').append(stat?.blocked)
+            append(',').append(stat?.conns)
+            append('|').append(dns.size).append(',').append(dns.firstOrNull()?.time)
+            append(',').append(dns.lastOrNull()?.time)
+            for (d in dns) append(',').append(d.countryCode)
+            append('|').append(conns.size).append(',').append(conns.firstOrNull()?.time)
+            append(',').append(conns.lastOrNull()?.time)
+            for (c in conns) append(',').append(c.countryCode)
+        }
+        if (sig == lastRenderedSig) return
+        lastRenderedSig = sig
 
         stats.text = if (stat == null) getString(R.string.no_activity_yet)
         else getString(R.string.app_stats_short_fmt, stat.queries, stat.blocked, stat.conns)
@@ -127,10 +191,7 @@ class AppDetailFragment : Fragment() {
             refreshNow()
         }
 
-        // DNS queries (tap row -> detail dialog). The filter is applied
-        // while collecting (up to 100 MATCHING entries), not after taking
-        // the newest N — busy apps no longer crowd out their blocked rows.
-        val dns = app.logBus().dnsForApp(appName, 100, filter)
+        // DNS query rows (tap row -> detail dialog).
         dnsList.removeAllViews()
         var dnsShown = 0
         for (d in dns) {
@@ -141,13 +202,11 @@ class AppDetailFragment : Fragment() {
             dnsShown++
         }
 
-        // Connections (same filter; the section is hidden under Bypass,
-        // which is a DNS-only concept).
-        val conns = app.logBus().connsForApp(appName, 100, if (filter == 3) 0 else filter)
+        // Connection rows.
         connList.removeAllViews()
         var connShown = 0
         for (c in conns) {
-            if (filter == 3) continue
+            if (filter == 3 || filter == 4) continue
             val tv = TextView(act)
             val flag = GeoIp.flagFor(c.countryCode)
             tv.text = (if (c.blocked) "🚫 " else if (flag.isEmpty()) "" else "$flag ") +
@@ -158,15 +217,16 @@ class AppDetailFragment : Fragment() {
             connList.addView(tv)
             connShown++
         }
-        connHeader.visibility = if (filter == 3) View.GONE else View.VISIBLE
-        connList.visibility = if (filter == 3) View.GONE else View.VISIBLE
+        connHeader.visibility = if (filter == 3 || filter == 4) View.GONE else View.VISIBLE
+        connList.visibility = if (filter == 3 || filter == 4) View.GONE else View.VISIBLE
 
         empty.visibility =
-            if (dnsShown == 0 && (filter == 3 || connShown == 0)) View.VISIBLE else View.GONE
+            if (dnsShown == 0 && (filter == 3 || filter == 4 || connShown == 0)) View.VISIBLE else View.GONE
     }
 
     companion object {
         private const val ARG_APP = "app"
+        private const val STATE_FILTER = "state_filter"
 
         @JvmStatic
         fun newInstance(appName: String): AppDetailFragment {

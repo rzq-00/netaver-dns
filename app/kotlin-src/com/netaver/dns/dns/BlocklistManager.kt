@@ -46,9 +46,18 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
     private val sourceCounts: MutableMap<String, Int> = HashMap()
     private val sourceErrors: MutableMap<String, String?> = HashMap()
     private val changeListeners: MutableList<Runnable> = ArrayList()
+    // E5: serializes refreshCustomLists — the VPN-start thread, the daily
+    // probe and the Lists tab could otherwise interleave cache/meta writes
+    private val refreshLock = Any()
 
     fun addChangeListener(r: Runnable) {
         synchronized(changeListeners) { changeListeners.add(r) }
+    }
+
+    /** M5 fix: lets owners unregister; without this every registered
+     * listener (and whatever it captures) is retained for the process life. */
+    fun removeChangeListener(r: Runnable) {
+        synchronized(changeListeners) { changeListeners.remove(r) }
     }
 
     private fun notifyChanged() {
@@ -94,17 +103,26 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
             synchronized(sourceCounts) { sourceCounts[cl.url] = cn }
             synchronized(sourceErrors) { sourceErrors.remove(cl.url) }
         }
-        blocklist.replaceSources(src)
-        notifyChanged()
+        // F3 (E5 adjacent): replaceSources + notifyChanged mutate the
+        // same shared state refreshCustomListsLocked does — run them
+        // under the same lock so a start-time load cannot interleave
+        // with a UI/probe refresh and transiently install a stale
+        // source set over the freshly merged one (or vice versa).
+        synchronized(refreshLock) {
+            blocklist.replaceSources(src)
+            notifyChanged()
+        }
     }
 
-    /** Auto-check on VPN start: any enabled cache missing, or no check in the last hour. */
+    /** Auto-check on VPN start: any enabled cache missing, or no check
+     *  within the user's interval (advanced setting, default 1 hour). */
     fun shouldAutoCheck(): Boolean {
         for (cl in customLists()) {
             if (!cl.enabled) continue
             if (!File(cacheDir(), cacheName(cl.url)).exists()) return true
         }
-        return System.currentTimeMillis() - prefs.lastListCheck() > CHECK_MIN_MS
+        val gapMs = prefs.blocklistCheckIntervalHours().toLong() * 3600_000L
+        return System.currentTimeMillis() - prefs.lastListCheck() > gapMs
     }
 
     /** Outcome counters for one refresh round (for the visible status line). */
@@ -116,6 +134,12 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
 
     /** Conditional-check + merge custom URL lists. Runs on caller thread (call off-main). */
     fun refreshCustomLists() {
+        // E5: the whole refresh runs under one lock, so concurrent callers
+        // (VPN start, daily probe, UI) queue up instead of interleaving
+        synchronized(refreshLock) { refreshCustomListsLocked() }
+    }
+
+    private fun refreshCustomListsLocked() {
         prefs.setLastListCheck(System.currentTimeMillis())
         val src = LinkedHashMap<String, Set<String>>()
         var bundledCount = 0
@@ -181,7 +205,12 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
                 val cached = HashSet<String>()
                 n = readCache(cl.url, cached)
                 if (n > 0) src[cl.url] = cached
-                else err = e.javaClass.simpleName
+                err = when {
+                    // a refused http list must say so even when a cache exists
+                    e is HttpsOnlyException -> ERR_HTTPS_ONLY
+                    n == 0 -> e.javaClass.simpleName
+                    else -> null
+                }
                 tally.failed++
             }
             synchronized(sourceCounts) { sourceCounts[cl.url] = n }
@@ -220,10 +249,26 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
         return d
     }
 
+    /**
+     * B6: write [f] via a temp file in the same directory + rename, so
+     * a kill/power loss mid-write can never leave a truncated cache or
+     * meta file behind that later reads treat as authoritative (with
+     * the meta intact, a later 304 would have served the truncated set
+     * indefinitely).
+     */
+    private fun writeFileAtomic(f: File, write: (BufferedWriter) -> Unit) {
+        val tmp = File(f.parentFile, f.name + ".tmp")
+        BufferedWriter(FileWriter(tmp)).use { w -> write(w) }
+        if (!tmp.renameTo(f)) {
+            tmp.delete()
+            throw IOException("rename failed for " + f.name)
+        }
+    }
+
     private fun writeCache(url: String, domains: Set<String>) {
         val f = File(cacheDir(), cacheName(url))
         try {
-            BufferedWriter(FileWriter(f)).use { w ->
+            writeFileAtomic(f) { w ->
                 for (d in domains) {
                     w.write(d)
                     w.newLine()
@@ -314,7 +359,7 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
 
     private fun writeMeta(url: String, etag: String, lastMod: String, hash: String) {
         try {
-            BufferedWriter(FileWriter(metaFile(url))).use { w ->
+            writeFileAtomic(metaFile(url)) { w ->
                 w.write("etag=" + etag)
                 w.newLine()
                 w.write("lastmod=" + lastMod)
@@ -335,7 +380,12 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
      *
      * @return KIND_UPDATED (new content) / KIND_UNCHANGED (304) / KIND_IDENTICAL (200, same bytes).
      */
+    /** Thrown when a list URL is not https: plaintext lists can be rewritten
+     *  by anyone on the network path, so they are refused (v2.3.4). */
+    private class HttpsOnlyException : IOException("https required")
+
     private fun fetchList(urlStr: String, out: MutableSet<String>): Int {
+        if (!urlStr.startsWith("https://", ignoreCase = true)) throw HttpsOnlyException()
         val meta = readMeta(urlStr)
         val c = URL(urlStr).openConnection() as HttpURLConnection
         c.connectTimeout = 15000
@@ -377,7 +427,8 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
         } finally {
             c.disconnect()
         }
-        val hash = md.digest().joinToString("") { "%02x".format(it) }
+        // F24: pin the locale — %02x must never render localized digits in a hash
+        val hash = md.digest().joinToString("") { String.format(Locale.US, "%02x", it) }
         writeMeta(urlStr, newEtag, newLastMod, hash)
         // Server ignored the validator but the bytes are identical: nothing to re-merge.
         if (meta != null && meta.hash.isNotEmpty() && meta.hash == hash) {
@@ -401,9 +452,16 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
     fun saveCustomLists(lists: List<CustomList>) {
         val sb = StringBuilder()
         for (cl in lists) {
+            val url = cl.url.trim()
+            // N3/U-N6: ';' and '|' are the stored format's delimiters
+            // (entries joined by ';', fields by '|') and whitespace can
+            // never appear in a URL — an entry carrying one would
+            // re-parse truncated and silently disabled, so it is
+            // dropped here just like the import path drops it.
+            if (url.contains(';') || url.contains('|') || url.any { it.isWhitespace() }) continue
             if (sb.isNotEmpty()) sb.append(';')
             sb.append(cl.name.replace("|", "").replace(";", ""))
-                .append('|').append(cl.url.trim())
+                .append('|').append(url)
                 .append('|').append(if (cl.enabled) "1" else "0")
         }
         prefs.setCustomListsRaw(sb.toString())
@@ -439,6 +497,10 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
         /** Sidecar file holding validators + content hash for each list cache. */
         private const val META_SUFFIX = ".meta"
 
+        /** Row-error marker for a refused http list; the UI translates it
+         *  (manager context is not language-wrapped). */
+        const val ERR_HTTPS_ONLY = "@https-only"
+
         /** fetchList outcomes: new content / 304 / identical body despite 200. */
         private const val KIND_UPDATED = 0
         private const val KIND_UNCHANGED = 1
@@ -449,7 +511,7 @@ class BlocklistManager(ctx: Context, private val prefs: Prefs) {
                 val md = MessageDigest.getInstance("SHA-256")
                 val h = md.digest(url.toByteArray(StandardCharsets.UTF_8))
                 val sb = StringBuilder()
-                for (b in h) sb.append(String.format("%02x", b))
+                for (b in h) sb.append(String.format(Locale.US, "%02x", b)) // F24
                 sb.toString() + ".txt"
             } catch (e: Exception) {
                 Integer.toHexString(url.hashCode()) + ".txt"

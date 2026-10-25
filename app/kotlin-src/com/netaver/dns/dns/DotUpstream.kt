@@ -24,7 +24,9 @@ class DotUpstream(vpn: VpnService, ip: String, tlsHost: String) :
             val lo = input.read()
             if (hi < 0) throw IOException("DoT EOF")
             val rlen = ((hi shl 8) or lo) and 0xFFFF
-            if (rlen <= 0 || rlen > 4096) throw IOException("DoT bad length: $rlen")
+            // M3: a DNS message may legally reach 65535 B (RFC max) — the
+            // old 4096 cap rejected legitimate large answers
+            if (rlen <= 0 || rlen > 65535) throw IOException("DoT bad length: $rlen")
             val resp = ByteArray(rlen)
             readFully(input, resp, rlen)
             return resp
