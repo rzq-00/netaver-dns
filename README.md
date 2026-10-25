@@ -44,6 +44,7 @@ need to build it yourself.
   <img src="screenshots/dns-log.png" width="160" alt="DNS Log — allowed and blocked queries">
   <img src="screenshots/apps.png" width="160" alt="Apps — per-app traffic and firewall">
   <img src="screenshots/lists.png" width="160" alt="Lists — blocklist management">
+  <img src="screenshots/upstream.png" width="160" alt="Upstream — providers, mode and latency">
   <img src="screenshots/settings.png" width="160" alt="Settings — language and general options">
   <img src="screenshots/settings-updates.png" width="160" alt="Settings — updates and changelog">
   <img src="screenshots/changelog.png" width="160" alt="Changelog — release history inside the app">
