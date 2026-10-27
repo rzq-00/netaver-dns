@@ -14,6 +14,7 @@ import java.nio.channels.SocketChannel
 import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Userspace TCP proxy: terminates the phone-side TCP on the TUN interface
@@ -69,6 +70,14 @@ class TcpProxy(private val vpn: DnsVpnService) {
 
     private val tcbs = ConcurrentHashMap<Long, Tcb>()
     private val tunQueue = ConcurrentLinkedQueue<IpPacket>()
+    /** Total upload bytes buffered across ALL connections (vc100: the
+     *  per-connection cap alone let multi-stream uploads (speedtest) pile
+     *  up megabytes — the burst, then the stall, then 2s loaded ping. */
+    private val totalUpBuffered = AtomicInteger(0)
+    /** Streams currently throttled (window 0). vc101: needed for the
+     *  sweep — a stream throttled by the GLOBAL cap must be re-opened
+     *  by whoever frees the budget, not by its own (never-again) drain. */
+    private val throttledTcbs = ConcurrentHashMap<Long, Tcb>()
     /** Per-thread packet build buffer: buildTcp+writeTun runs on both the tun
      *  thread and the selector thread — a shared buffer corrupted packets. */
     private val outPktLocal = ThreadLocal.withInitial { ByteArray(2048) }
@@ -91,6 +100,21 @@ class TcpProxy(private val vpn: DnsVpnService) {
         for (t in tcbs.values) closeTcb(t, true)
         tcbs.clear()
         try { if (::selector.isInitialized) selector.close() } catch (_: Exception) {}
+    }
+
+    /**
+     * Network change (WiFi switch): the WAN sockets of established
+     * connections are bound to the dead network's local IP and blackhole
+     * (no error, no RST from the server), while the client-side TUN
+     * connection stays ESTABLISHED — so downloads look "stuck, not
+     * disconnected". RST every TCB so apps reconnect immediately via the
+     * new network. Same pattern as stop(), but the selector keeps running.
+     */
+    fun resetAllForNetworkChange() {
+        if (!running) return
+        for (t in tcbs.values.toList()) resetAndClose(t)
+        tcbs.clear()
+        try { if (::selector.isInitialized) selector.wakeup() } catch (_: Exception) {}
     }
 
     /** Called on TUN reader thread: just enqueue. */
@@ -192,7 +216,13 @@ class TcpProxy(private val vpn: DnsVpnService) {
             if (ack == (t.sndNxt.toLong() and 0xFFFFFFFFL)) closeTcb(t, true)
             return
         }
-        if (t.state != S_ESTABLISHED) return // CONNECTING: ignore client retransmits
+        if (t.state == S_CONNECTING && (flags and IpPacket.SYN) != 0) {
+            // Optimistic SYN-ACK was lost: resend it (client retransmits SYN).
+            sendTcp(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
+                    t.iss.toLong(), t.rcvNxt.toLong(), IpPacket.SYN or IpPacket.ACK, null, 0, 0, MSS)
+            return
+        }
+        if (t.state != S_ESTABLISHED && t.state != S_CONNECTING) return
 
         // ACK processing (advances sndUna)
         if ((flags and IpPacket.ACK) != 0) {
@@ -239,16 +269,20 @@ class TcpProxy(private val vpn: DnsVpnService) {
                 var dropped = false
                 var queued = false
                 synchronized(t) {
-                    if (!t.writeQueue.isEmpty()) {
-                        // selector is draining: append strictly in order
+                    // While CONNECTING the WAN socket is not writable yet
+                    // (direct write would throw NotYetConnected): queue only,
+                    // onConnect drains once the real connection is up.
+                    if (!t.writeQueue.isEmpty() || t.state == S_CONNECTING) {
+                        // selector is draining: append strictly in order.
+                        // vc102: ZERO-COPY — src already wraps the private
+                        // per-packet array (single-use, never reused), so
+                        // queue it directly instead of allocate+copy.
                         if (t.upBuffered + payloadLen > UP_BUF_MAX) {
                             dropped = true
                         } else {
-                            val pend = ByteBuffer.allocate(payloadLen)
-                            pend.put(src)
-                            pend.flip()
-                            t.writeQueue.addLast(pend)
+                            t.writeQueue.addLast(src)
                             t.upBuffered += payloadLen
+                            totalUpBuffered.addAndGet(payloadLen)
                             queued = true
                         }
                     } else {
@@ -259,12 +293,12 @@ class TcpProxy(private val vpn: DnsVpnService) {
                                 if (t.upBuffered + src.remaining() > UP_BUF_MAX) {
                                     dropped = true
                                 } else {
-                                    // queue remainder IN ORDER (never overwrite pending data)
-                                    val pend = ByteBuffer.allocate(src.remaining())
-                                    pend.put(src)
-                                    pend.flip()
-                                    t.writeQueue.addLast(pend)
-                                    t.upBuffered += pend.remaining()
+                                    // queue remainder IN ORDER: src is
+                                    // already positioned at the remainder
+                                    // (vc102: no allocate+copy anymore)
+                                    t.writeQueue.addLast(src)
+                                    t.upBuffered += src.remaining()
+                                    totalUpBuffered.addAndGet(src.remaining())
                                     queued = true
                                 }
                             }
@@ -275,9 +309,13 @@ class TcpProxy(private val vpn: DnsVpnService) {
                     }
                     if (!dropped) {
                         t.rcvNxt += payloadLen
-                        // backpressure: throttle the client when our upload buffer fills
-                        if (!t.upThrottled && t.upBuffered >= UP_BUF_HIGH) {
+                        // backpressure: throttle the client when our upload buffer fills.
+                        // vc100: the cap is GLOBAL — a per-connection cap alone let
+                        // multi-stream uploads buffer megabytes in aggregate.
+                        if (!t.upThrottled && (t.upBuffered >= UP_BUF_HIGH ||
+                                totalUpBuffered.get() >= GLOBAL_UP_HIGH)) {
                             t.upThrottled = true
+                            throttledTcbs[k] = t
                         }
                     }
                 }
@@ -334,7 +372,10 @@ class TcpProxy(private val vpn: DnsVpnService) {
         val lanBypass = vpn.isLanBypass(p.dstIp)
         // (b) compute the destination string once; reused below for geo lookup
         val srvIpStr = IpPacket.ipToString(p.dstIp)
-        vpn.debugConnStart(vpn.resolver().labelForUid(uid), "TCP",
+        // vc100: the app label (PackageManager) is NOT resolved on the
+        // handshake path anymore — it is resolved lazily at close time.
+        // debugConnStart itself gates on capturing, so it stays ~free.
+        vpn.debugConnStart(vpn.resolver(), uid, "TCP",
                 "$srvIpStr:${p.tcpDstPort()}")
         // ---- firewall (RethinkDNS-style per-app block; skipped for LAN passthrough) ----
         if (!lanBypass && vpn.firewall().isBlocked(uid)) {
@@ -365,9 +406,20 @@ class TcpProxy(private val vpn: DnsVpnService) {
             val ch = SocketChannel.open()
             ch.configureBlocking(false)
             ch.setOption(StandardSocketOptions.TCP_NODELAY, true)
+            // vc103: bound the kernel send buffer explicitly. The proxy's
+            // throttle only counts its own writeQueue — bytes already
+            // written to the WAN socket can still sit in the kernel's
+            // autotuned SO_SNDBUF (megabytes), invisible to the throttle.
+            // UL-loaded ping 2115 ms at 27 Mbps implies ~7 MB queued
+            // somewhere — far above the counted 512 KB. Linux doubles
+            // the set value, so 128 KB here means ~256 KB effective:
+            // above the ~70-170 KB BDP, far below the multi-MB backlog.
+            ch.setOption(StandardSocketOptions.SO_SNDBUF, 128 * 1024)
             vpn.protect(ch.socket())
             t.ch = ch
-            t.app = vpn.resolver().labelForUid(uid)
+            // vc100: app label resolved lazily at close (closeTcb falls back
+            // to labelForUid) — no PackageManager call on the handshake path.
+            t.app = null
             // kick off country resolution for the log (cached after first hit)
             t.countryCode = vpn.geoIp().cached(srvIpStr)
             vpn.geoIp().resolve(srvIpStr)
@@ -377,6 +429,12 @@ class TcpProxy(private val vpn: DnsVpnService) {
             // register() from the tun thread: wake the selector so OP_CONNECT
             // is noticed immediately instead of at the next 5s select timeout
             selector.wakeup()
+            // vc100: OPTIMISTIC SYN-ACK — the client handshake no longer
+            // waits for the real connect + setup queue. Data the client
+            // sends meanwhile is queued and drained by onConnect.
+            // vc102: advertise MSS so the client sends 1460B segments.
+            sendTcp(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
+                    t.iss.toLong(), t.rcvNxt.toLong(), IpPacket.SYN or IpPacket.ACK, null, 0, 0, MSS)
             if (done) onConnect(ch.keyFor(selector), t)
         } catch (e: Exception) {
             Log.d(TAG, "connect failed", e)
@@ -394,9 +452,11 @@ class TcpProxy(private val vpn: DnsVpnService) {
             t.state = S_ESTABLISHED
             t.lastActivity = System.currentTimeMillis()
             k.interestOps(SelectionKey.OP_READ)
-            // SYN+ACK to client
-            sendTcp(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
-                    t.iss.toLong(), t.rcvNxt.toLong(), IpPacket.SYN or IpPacket.ACK, null, 0, 0)
+            // SYN+ACK already went out optimistically in newConnection.
+            // Drain anything the client sent while connecting, and honor
+            // a FIN that arrived before the real connection was up.
+            if (t.cliFin) maybeShutdownOutput(t)
+            if (!t.writeQueue.isEmpty()) requestWrite(t)
         }
     }
 
@@ -442,6 +502,9 @@ class TcpProxy(private val vpn: DnsVpnService) {
     }
 
     private fun onSocketWrite(k: SelectionKey, t: Tcb) {
+        // OP_WRITE must never fire on a not-yet-connected channel; if it
+        // does, onConnect's drain request below handles the queue.
+        if (t.state != S_ESTABLISHED) return
         var sendWindowUpdate = false
         synchronized(t) {
             val wasThrottled = t.upThrottled
@@ -451,6 +514,7 @@ class TcpProxy(private val vpn: DnsVpnService) {
                 t.ch.write(b)
                 val wroteNow = rem - b.remaining()
                 t.upBuffered -= wroteNow
+                totalUpBuffered.addAndGet(-wroteNow)
                 t.bytesUp += wroteNow
                 if (b.hasRemaining()) break // socket full again
                 t.writeQueue.pollFirst()
@@ -464,12 +528,24 @@ class TcpProxy(private val vpn: DnsVpnService) {
                     try { t.ch.shutdownOutput() } catch (_: Exception) {}
                 }
             }
-            // re-open the receive window once drained enough
+            // vc104: re-open on the stream's OWN queue only. The global
+            // cap stays a throttle-SET trigger, but it must never keep
+            // a stream frozen because OTHER streams hold the budget: a
+            // slow stream holding 300 KB would otherwise freeze every
+            // empty-queue stream for seconds (the global-freeze pause).
             if (wasThrottled && t.upBuffered < UP_BUF_LOW) {
                 t.upThrottled = false
+                throttledTcbs.remove(key(t.cliIp, t.cliPort, t.srvIp, t.srvPort))
                 sendWindowUpdate = true
             }
         }
+        // vc104: sweep unconditionally (no global-total gate). A stream
+        // throttled by the global cap with an EMPTY queue never gets
+        // another onSocketWrite, so only another stream's drain event
+        // can re-open it. The sweep itself is cheap when nothing is
+        // throttled (early return) and only re-opens streams whose own
+        // queue already drained.
+        sweepThrottled()
         if (sendWindowUpdate) {
             sendTcpW(t.srvIp, t.cliIp, t.srvPort, t.cliPort,
                     t.sndNxt.toLong(), t.rcvNxt.toLong(), IpPacket.ACK, null, 0, 0, ADV_WINDOW)
@@ -477,6 +553,38 @@ class TcpProxy(private val vpn: DnsVpnService) {
     }
 
     // ---------------- sending ----------------
+
+    /**
+     * vc101/vc104: re-open every throttled stream whose own queue
+     * already drained, regardless of the global total. Without this,
+     * a stream throttled by the global cap (not its own queue) stays
+     * at window 0: its queue is empty so its onSocketWrite never
+     * fires again, and the client's persist probes only get dup-ACKs
+     * with window 0. Window updates are sent outside the Tcb locks.
+     */
+    private fun sweepThrottled() {
+        if (throttledTcbs.isEmpty()) return
+        val reopen = ArrayList<Tcb>()
+        for ((k, u) in throttledTcbs) {
+            if (!tcbs.containsKey(k)) {
+                throttledTcbs.remove(k)
+                continue
+            }
+            synchronized(u) {
+                if (u.upThrottled && u.upBuffered < UP_BUF_LOW) {
+                    u.upThrottled = false
+                    throttledTcbs.remove(k)
+                    reopen.add(u)
+                }
+            }
+        }
+        for (u in reopen) {
+            try {
+                sendTcpW(u.srvIp, u.cliIp, u.srvPort, u.cliPort,
+                        u.sndNxt.toLong(), u.rcvNxt.toLong(), IpPacket.ACK, null, 0, 0, ADV_WINDOW)
+            } catch (_: Exception) { }
+        }
+    }
 
     /** Receive window to advertise to the client (upload backpressure). */
     private fun advWindow(t: Tcb): Int =
@@ -500,14 +608,16 @@ class TcpProxy(private val vpn: DnsVpnService) {
     }
 
     private fun sendTcp(srcIp: Int, dstIp: Int, srcPort: Int, dstPort: Int,
-                        seq: Long, ack: Long, flags: Int, pl: ByteArray?, poff: Int, plen: Int) {
-        sendTcpW(srcIp, dstIp, srcPort, dstPort, seq, ack, flags, pl, poff, plen, ADV_WINDOW)
+                        seq: Long, ack: Long, flags: Int, pl: ByteArray?, poff: Int, plen: Int,
+                        mss: Int = 0) {
+        sendTcpW(srcIp, dstIp, srcPort, dstPort, seq, ack, flags, pl, poff, plen, ADV_WINDOW, mss)
     }
 
     private fun sendTcpW(srcIp: Int, dstIp: Int, srcPort: Int, dstPort: Int,
-                         seq: Long, ack: Long, flags: Int, pl: ByteArray?, poff: Int, plen: Int, window: Int) {
+                         seq: Long, ack: Long, flags: Int, pl: ByteArray?, poff: Int, plen: Int,
+                         window: Int, mss: Int = 0) {
         val total = IpPacket.buildTcp(outPkt(), srcIp, dstIp, srcPort, dstPort,
-                seq, ack, flags, window, pl, poff, plen)
+                seq, ack, flags, window, pl, poff, plen, mss)
         vpn.writeTun(outPkt(), total)
     }
 
@@ -592,6 +702,15 @@ class TcpProxy(private val vpn: DnsVpnService) {
     private fun closeTcb(t: Tcb, graceful: Boolean) {
         val k = key(t.cliIp, t.cliPort, t.srvIp, t.srvPort)
         tcbs.remove(k)
+        throttledTcbs.remove(k)
+        // Reclaim the global upload accounting for bytes still queued
+        // (the 0-guard makes a second close of the same Tcb a no-op).
+        if (t.upBuffered > 0) {
+            totalUpBuffered.addAndGet(-t.upBuffered)
+            t.upBuffered = 0
+        }
+        // vc104: a close can re-open stuck streams (see sweep note above).
+        sweepThrottled()
         // drop the cached UID: the ephemeral port may be reused by another app
         try { vpn.resolver().invalidateFlow(AppResolver.protoTcp(),
                 t.cliIp, t.cliPort, t.srvIp, t.srvPort) } catch (_: Exception) {}
@@ -631,6 +750,14 @@ class TcpProxy(private val vpn: DnsVpnService) {
         private const val UP_BUF_HIGH = 512 * 1024 // advertise zero window above this
         private const val UP_BUF_LOW = 128 * 1024 // re-open window below this
         private const val UP_BUF_MAX = 4 * 1024 * 1024 // hard drop above this (rude client)
+        // vc100: GLOBAL cap across all connections (512KB ≈ 2.5x BDP at
+        // 33Mbps/50ms — safe for throughput, kills the multi-stream pile-up).
+        private const val GLOBAL_UP_HIGH = 512 * 1024 // throttle all streams above this
+        private const val GLOBAL_UP_LOW = 128 * 1024 // re-open below this
+        // vc102: MSS advertised in SYN-ACK (TUN MTU is 1500). Without it
+        // the client sends 536-byte segments (RFC 879 default) — ~3x the
+        // packet rate, selector work and GC churn on the upload path.
+        private const val MSS = 1460
         private const val ADV_WINDOW = 65535
     }
 }

@@ -100,7 +100,7 @@
     <string name="show_system_apps_desc">Tampilkan paket sistem di daftar Apps dan Split Tunnel</string>
     <string name="firewall">Firewall aplikasi</string>
     <string name="firewall_desc">Blokir internet per aplikasi. Atur per aplikasi di tab Apps.</string>
-    <string name="formats_hint">Format: tls://host (DoT), https://host/path (DoH), IP, atau hostname</string>
+    <string name="formats_hint">Format: tls://host (DoT), https://host/path (DoH)</string>
     <string name="geoip">Bendera negara di log</string>
     <string name="geoip_desc">Cari negara tujuan untuk log koneksi (di-cache, hemat data)</string>
     <string name="import_failed_fmt">Impor gagal: %1$s</string>
@@ -143,6 +143,12 @@
     <string name="show_notification">Notifikasi status</string>
     <string name="show_notification_desc">Tampilkan ikon VPN permanen</string>
     <string name="show_system_apps">Tampilkan aplikasi sistem</string>
+    <string name="sort_az">A-Z</string>
+    <string name="sort_most_queries">Query terbanyak</string>
+    <string name="sort_most_blocked">Blokir terbanyak</string>
+    <string name="sort_button_fmt">↕ Urutkan: %1$s</string>
+    <string name="apps_found_one">1 aplikasi ditemukan</string>
+    <string name="apps_found_fmt">%1$d aplikasi ditemukan</string>
     <string name="split_tunnel">Split tunnel</string>
     <string name="split_tunnel_desc">Aplikasi yang dicentang bypass VPN total: koneksinya langsung tanpa filter, tanpa DNS NetAver, dan tanpa tercatat di log. Untuk aplikasi yang tidak mau lewat VPN (mis. m-banking, game).</string>
     <string name="start_on_boot">Mulai saat boot</string>
@@ -169,7 +175,7 @@
     <string name="trait_bebasdns">Indonesia (BebasID) · memblokir iklan &amp; malware</string>
     <string name="trait_cleanbrowsing">Filter aman untuk keluarga</string>
     <string name="trait_cloudflare">Cepat · utamakan privasi · tanpa filter</string>
-    <string name="trait_custom">Ketik alamat tls://, https://, atau IP apa pun</string>
+    <string name="trait_custom">Ketik alamat tls:// atau https://</string>
     <string name="trait_google">Cepat · global · tanpa filter</string>
     <string name="trait_nextdns">Anycast · latensi sangat rendah</string>
     <string name="trait_quad9">Memblokir malware &amp; phishing</string>
@@ -206,7 +212,7 @@
     <string name="app_no_activity_system">Belum ada aktivitas · paket sistem</string>
     <string name="app_stats_fmt">%1$d kueri · %2$d diblokir · %3$d koneksi · %4$s</string>
     <string name="app_stats_short_fmt">%1$d kueri · %2$d diblokir · %3$d koneksi</string>
-    <string name="bad_format_upstream">Format salah: tls://host, https://host/path, IP atau hostname</string>
+    <string name="bad_format_upstream">Format salah: tls://host atau https://host/path</string>
     <string name="builtin_list_name">Bawaan: Iklan &amp; Pelacak</string>
     <string name="debug_export_failed_fmt">Ekspor debug gagal: %1$s</string>
     <string name="debug_started">Rekaman debug dimulai — ulangi masalahnya, lalu ketuk Stop</string>

@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.widget.Switch
@@ -17,6 +18,7 @@ import com.netaver.dns.NetAverApp
 import com.netaver.dns.R
 import com.netaver.dns.log.Entries
 import com.netaver.dns.net.GeoIp
+import com.netaver.dns.util.AppIcons
 import com.netaver.dns.util.FirewallManager
 
 import java.text.SimpleDateFormat
@@ -31,6 +33,8 @@ import java.util.Locale
 class AppDetailFragment : Fragment() {
     private lateinit var appName: String
     private lateinit var icon: TextView
+    private lateinit var iconImg: ImageView
+    private var lastIconUid: Int = Int.MIN_VALUE
     private lateinit var name: TextView
     private lateinit var stats: TextView
     private lateinit var dot: TextView
@@ -59,6 +63,7 @@ class AppDetailFragment : Fragment() {
             filter = savedInstanceState.getInt(STATE_FILTER, filter)
         }
         icon = v.findViewById(R.id.detail_icon)
+        iconImg = v.findViewById(R.id.detail_icon_img)
         name = v.findViewById(R.id.detail_name)
         stats = v.findViewById(R.id.detail_stats)
         dot = v.findViewById(R.id.detail_dot)
@@ -140,6 +145,13 @@ class AppDetailFragment : Fragment() {
         }
         val uid = stat?.uid ?: -100
         val blocked = uid >= 0 && fw.isBlocked(uid)
+        // Real app icon, loaded once per uid (refreshNow ticks every 3 s,
+        // but the icon never changes for the same app). Falls back to the
+        // letter when no uid is known (same as before).
+        if (uid != lastIconUid) {
+            lastIconUid = uid
+            AppIcons.load(act.packageManager, uid, iconImg, icon)
+        }
 
         // Both lists are fetched up front (cheap in-memory scans) so the
         // U6 change guard can decide before any view gets inflated.

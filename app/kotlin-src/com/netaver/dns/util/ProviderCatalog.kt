@@ -113,10 +113,8 @@ object ProviderCatalog {
         else -> "DoT"
     }
 
-    /** Short chip text for an ACTIVE row, e.g. "Standard · DoT" or "DoH". */
-    fun chipText(id: Identity): String =
-        if (id.variantName.isEmpty()) protoNameKey(id.proto)
-        else "${id.variantName} · ${protoNameKey(id.proto)}"
+    /** Short chip text for an ACTIVE row: protocol only ("DoT", "DoH", "IPv4"). */
+    fun chipText(id: Identity): String = protoNameKey(id.proto)
 
     /** Normalized match key for a URL-ish spec: scheme + host + significant path. */
     private fun urlKey(scheme: String, host: String, path: String): String {

@@ -8,15 +8,26 @@
     android:background="@color/surface"
     android:descendantFocusability="blocksDescendants">
 
-    <TextView
-        android:id="@+id/item_icon"
+    <FrameLayout
         android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:background="@drawable/badge_bg"
-        android:gravity="center"
-        android:textColor="@color/accent"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:layout_height="36dp">
+
+        <TextView
+            android:id="@+id/item_icon"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/badge_bg"
+            android:gravity="center"
+            android:textColor="@color/accent"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/item_icon_img"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <LinearLayout
         android:layout_width="0dp"

@@ -11,7 +11,7 @@ AJAR=$SDK/platforms/android-34/android.jar
 KOTLINC=~/kotlin/kotlinc/bin/kotlinc
 STDLIB=~/kotlin/kotlinc/lib/kotlin-stdlib.jar
 KS=$APP/../debug.keystore
-APKNAME="NetAverDNS-v2.3.3.apk"
+APKNAME="NetAverDNS-v2.3.8.apk"
 EXPECT_CERT="<CERT_SHA256_KEYSTORE_SENDIRI>"
 
 export JAVA_HOME=~/jdk17

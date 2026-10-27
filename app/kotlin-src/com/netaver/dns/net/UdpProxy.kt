@@ -62,6 +62,17 @@ class UdpProxy(private val vpn: DnsVpnService) {
         try { if (::selector.isInitialized) selector.close() } catch (_: Exception) {}
     }
 
+    /**
+     * Network change (WiFi switch): drop all UDP sessions so the next
+     * packet from the client creates a fresh session via the new network.
+     * Unlike stop(), the selector loop keeps running.
+     */
+    fun resetAllSessions() {
+        if (!running) return
+        for (e in sessions.entries.toList()) closeSession(e.key, e.value, false)
+        sessions.clear()
+    }
+
     /** Called on the TUN reader thread. */
     fun handle(p: IpPacket) {
         if (!running) return
@@ -77,7 +88,7 @@ class UdpProxy(private val vpn: DnsVpnService) {
             val lanBypass = vpn.isLanBypass(p.dstIp)
             // (b) compute the destination string once; reused for connect + geo below
             val dstIpStr = IpPacket.ipToString(p.dstIp)
-            vpn.debugConnStart(vpn.resolver().labelForUid(uid), "UDP", "$dstIpStr:$dstPort")
+            vpn.debugConnStart(vpn.resolver(), uid, "UDP", "$dstIpStr:$dstPort")
             // ---- firewall (RethinkDNS-style per-app block; skipped for LAN passthrough) ----
             if (!lanBypass && vpn.firewall().isBlocked(uid)) {
                 val app = vpn.resolver().labelForUid(uid)

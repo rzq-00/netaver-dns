@@ -100,7 +100,7 @@
     <string name="show_system_apps_desc">Show system packages in the Apps and Split Tunnel lists</string>
     <string name="firewall">App firewall</string>
     <string name="firewall_desc">Block internet per app. Configure per app in the Apps tab.</string>
-    <string name="formats_hint">Formats: tls://host (DoT), https://host/path (DoH), IP, or hostname</string>
+    <string name="formats_hint">Formats: tls://host (DoT), https://host/path (DoH)</string>
     <string name="geoip">Country flags in logs</string>
     <string name="geoip_desc">Look up destination countries for connection logs (cached, data-light)</string>
     <string name="import_failed_fmt">Import failed: %1$s</string>
@@ -143,6 +143,12 @@
     <string name="show_notification">Status notification</string>
     <string name="show_notification_desc">Show the permanent VPN status icon</string>
     <string name="show_system_apps">Show system apps</string>
+    <string name="sort_az">A-Z</string>
+    <string name="sort_most_queries">Most queries</string>
+    <string name="sort_most_blocked">Most blocked</string>
+    <string name="sort_button_fmt">↕ Sort: %1$s</string>
+    <string name="apps_found_one">1 app found</string>
+    <string name="apps_found_fmt">%1$d apps found</string>
     <string name="split_tunnel">Split tunnel</string>
     <string name="split_tunnel_desc">Checked apps bypass the VPN entirely: their traffic goes direct with no filtering, no NetAver DNS, and nothing is logged. For apps that refuse to work through a VPN (e.g. mobile banking, games).</string>
     <string name="start_on_boot">Start on boot</string>
@@ -169,7 +175,7 @@
     <string name="trait_bebasdns">Indonesia (BebasID) · blocks ads &amp; malware</string>
     <string name="trait_cleanbrowsing">Family-safe filtering</string>
     <string name="trait_cloudflare">Fast · privacy-first · no filtering</string>
-    <string name="trait_custom">Type any tls://, https:// or IP address</string>
+    <string name="trait_custom">Type any tls:// or https://</string>
     <string name="trait_google">Fast · global · no filtering</string>
     <string name="trait_nextdns">Anycast · ultra-low latency</string>
     <string name="trait_quad9">Blocks malware &amp; phishing</string>
@@ -206,7 +212,7 @@
     <string name="app_no_activity_system">No activity yet · system package</string>
     <string name="app_stats_fmt">%1$d queries · %2$d blocked · %3$d conns · %4$s</string>
     <string name="app_stats_short_fmt">%1$d queries · %2$d blocked · %3$d conns</string>
-    <string name="bad_format_upstream">Invalid format: tls://host, https://host/path, IP or hostname</string>
+    <string name="bad_format_upstream">Invalid format: tls://host or https://host/path</string>
     <string name="builtin_list_name">Built-in Ads &amp; Trackers</string>
     <string name="debug_export_failed_fmt">Debug export failed: %1$s</string>
     <string name="debug_started">Debug capture started — reproduce the issue, then tap Stop</string>

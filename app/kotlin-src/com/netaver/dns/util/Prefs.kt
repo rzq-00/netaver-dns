@@ -31,6 +31,9 @@ class Prefs(ctx: Context) {
         const val KEY_UPSTREAM_MODE = "upstream_mode" // 0=parallel 1=fastest 2=sequential
         const val KEY_UPSTREAMS_MIGRATED = "upstreams_migrated"
         const val MAX_UPSTREAMS = 5 // battery guard: bound parallel fan-out
+        const val KEY_CUSTOM_UPSTREAM_HISTORY = "custom_upstream_history" // ";"-separated saved customs
+        const val KEY_CUSTOM_UPSTREAM_NAMES = "custom_upstream_names" // ";"-joined spec+SEP+name pairs
+        const val MAX_CUSTOM_HISTORY = 20 // history is not the active list: no fan-out cost
         const val MODE_PARALLEL = 0
         const val MODE_FASTEST = 1
         const val MODE_SEQUENTIAL = 2
@@ -55,6 +58,7 @@ class Prefs(ctx: Context) {
         const val KEY_TOTAL_BLOCKED_ALL = "total_blocked_all" // cumulative Home counter
         const val KEY_TOTALS_SEEDED = "totals_seeded"
         const val KEY_SHOW_SYSTEM_APPS = "show_system_apps"
+        const val KEY_APP_SORT = "app_sort" // 0=A-Z 1=most queries 2=most blocked
 
         // Built-in default custom lists (Hagezi) - user can toggle
         const val DEFAULT_HAGEZI_PRO =
@@ -241,6 +245,68 @@ class Prefs(ctx: Context) {
     fun setUpstreamList(v: List<String>) {
         val clean = v.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(MAX_UPSTREAMS)
         sp.edit().putString(KEY_UPSTREAM_LIST, clean.joinToString(";")).apply()
+    }
+
+    /** Saved custom upstreams (history), newest last. Independent of the
+     *  active list: removing from active does NOT remove from history.
+     *  NOT capped by MAX_UPSTREAMS (history entries are not queried). */
+    fun customUpstreamHistory(): List<String> {
+        val raw: String = sp.getString(KEY_CUSTOM_UPSTREAM_HISTORY, "") ?: ""
+        if (raw.isEmpty()) return emptyList()
+        return raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    }
+
+    fun setCustomUpstreamHistory(v: List<String>) {
+        val clean = v.map { it.trim() }.filter { it.isNotEmpty() }.distinct().takeLast(MAX_CUSTOM_HISTORY)
+        sp.edit().putString(KEY_CUSTOM_UPSTREAM_HISTORY, clean.joinToString(";")).apply()
+    }
+
+    /** Display names for saved customs, independent of history and of the
+     *  active list (so forgetting a history card never renames an active
+     *  row). Format: ";"-joined "spec\u0001name"; names are sanitized
+     *  (no ";" or control chars, max 40 chars) so the format can't break. */
+    private fun customUpstreamNameMap(): Map<String, String> {
+        val raw: String = sp.getString(KEY_CUSTOM_UPSTREAM_NAMES, "") ?: ""
+        if (raw.isEmpty()) return emptyMap()
+        val m = LinkedHashMap<String, String>()
+        for (e in raw.split(";")) {
+            val i = e.indexOf('\u0001')
+            if (i > 0) {
+                val n = e.substring(i + 1)
+                if (n.isNotEmpty()) m[e.substring(0, i)] = n
+            }
+        }
+        return m
+    }
+
+    fun customUpstreamName(spec: String): String? = customUpstreamNameMap()[spec]
+
+    /** Raw stored names string (for backup export; the import side parses
+     *  it back through setCustomUpstreamNames, which re-sanitizes). */
+    fun customUpstreamNamesRaw(): String = sp.getString(KEY_CUSTOM_UPSTREAM_NAMES, "") ?: ""
+
+    private fun sanitizeCustomName(name: String): String =
+        name.trim().replace(";", " ").replace("\n", " ").replace("\r", " ")
+            .replace("\u0001", " ").replace(Regex("\\s+"), " ").take(40)
+
+    fun setCustomUpstreamName(spec: String, name: String) {
+        val clean = sanitizeCustomName(name)
+        val m = customUpstreamNameMap().toMutableMap()
+        if (clean.isEmpty()) m.remove(spec) else m[spec] = clean
+        sp.edit().putString(KEY_CUSTOM_UPSTREAM_NAMES,
+            m.entries.joinToString(";") { "${it.key}\u0001${it.value}" }).apply()
+    }
+
+    /** Replace the whole name store (backup restore semantics: the backup
+     *  IS the state, not a merge). Entries are sanitized like single sets. */
+    fun setCustomUpstreamNames(entries: Map<String, String>) {
+        val clean = LinkedHashMap<String, String>()
+        for ((spec, name) in entries) {
+            val n = sanitizeCustomName(name)
+            if (spec.isNotEmpty() && n.isNotEmpty()) clean[spec] = n
+        }
+        sp.edit().putString(KEY_CUSTOM_UPSTREAM_NAMES,
+            clean.entries.joinToString(";") { "${it.key}\u0001${it.value}" }).apply()
     }
 
     /** 0=parallel (race, fastest wins), 1=fastest (lowest latency EMA), 2=sequential (ordered failover).
@@ -499,6 +565,13 @@ class Prefs(ctx: Context) {
 
     fun setShowSystemApps(on: Boolean) {
         sp.edit().putBoolean(KEY_SHOW_SYSTEM_APPS, on).apply()
+    }
+
+    /** Apps-tab sort: 0=A-Z, 1=most queries (default), 2=most blocked. */
+    fun appSort(): Int = sp.getInt(KEY_APP_SORT, 1).coerceIn(0, 2)
+
+    fun setAppSort(mode: Int) {
+        sp.edit().putInt(KEY_APP_SORT, mode.coerceIn(0, 2)).apply()
     }
 
     fun setTotalsSeeded() {

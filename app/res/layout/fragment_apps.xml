@@ -29,14 +29,142 @@
         android:textSize="11sp"
         android:paddingBottom="8dp" />
 
-    <CheckBox
-        android:id="@+id/apps_show_system"
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="8dp">
+
+        <CheckBox
+            android:id="@+id/apps_show_system"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/show_system_apps"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <ImageButton
+            android:id="@+id/apps_search_btn"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/card_bg"
+            android:src="@drawable/ic_search"
+            android:scaleType="fitCenter"
+            android:padding="6dp"
+            android:contentDescription="@string/search_apps_hint" />
+    </LinearLayout>
+
+    <EditText
+        android:id="@+id/apps_search_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/card_bg"
+        android:hint="@string/search_apps_hint"
+        android:textColor="@color/text"
+        android:textColorHint="@color/faint"
+        android:textSize="14sp"
+        android:padding="10dp"
+        android:singleLine="true"
+        android:imeOptions="actionSearch"
+        android:visibility="gone"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/apps_sort_btn"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/show_system_apps"
-        android:textColor="@color/muted"
-        android:textSize="13sp"
-        android:paddingBottom="8dp" />
+        android:background="@drawable/card_bg"
+        android:textColor="@color/text"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:id="@+id/apps_sort_menu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/card_bg"
+        android:visibility="gone"
+        android:layout_marginBottom="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <LinearLayout
+            android:id="@+id/apps_sort_row_az"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/apps_sort_ring_az"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:paddingRight="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/sort_az"
+                android:textColor="@color/text"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/apps_sort_row_queries"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/apps_sort_ring_queries"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:paddingRight="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/sort_most_queries"
+                android:textColor="@color/text"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/apps_sort_row_blocked"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/apps_sort_ring_blocked"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:paddingRight="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/sort_most_blocked"
+                android:textColor="@color/text"
+                android:textSize="15sp" />
+        </LinearLayout>
+    </LinearLayout>
 
     <ListView
         android:id="@+id/apps_list"
@@ -45,6 +173,15 @@
         android:layout_weight="1"
         android:divider="@color/border"
         android:dividerHeight="1dp" />
+
+    <TextView
+        android:id="@+id/apps_result_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/faint"
+        android:textSize="12sp"
+        android:paddingTop="6dp"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/apps_empty"

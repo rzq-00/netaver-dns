@@ -29,7 +29,6 @@ import com.netaver.dns.util.ProviderCatalog
  */
 class UpstreamFragment : Fragment() {
     private lateinit var root: LinearLayout
-    private lateinit var statusTv: TextView
     private val pingViews = HashMap<String, TextView>()
     private val handler = Handler(Looper.getMainLooper())
     private var ticker: Runnable? = null
@@ -170,7 +169,12 @@ class UpstreamFragment : Fragment() {
         // ACTIVE card
         val specs = p.upstreamList()
         val actCard = card()
-        actCard.addView(cardLabel(getString(R.string.up_active_fmt, specs.size, Prefs.MAX_UPSTREAMS)))
+        val modeName = when (p.upstreamMode()) {
+            Prefs.MODE_FASTEST -> getString(R.string.mode_fastest)
+            Prefs.MODE_SEQUENTIAL -> getString(R.string.mode_sequential)
+            else -> getString(R.string.mode_parallel)
+        }
+        actCard.addView(cardLabel("$modeName - ${specs.size} up to ${Prefs.MAX_UPSTREAMS} Upstream"))
         if (specs.isEmpty()) {
             val t = TextView(act)
             t.setText(R.string.empty_upstreams)
@@ -183,35 +187,7 @@ class UpstreamFragment : Fragment() {
         }
         root.addView(actCard)
 
-        // failover status line (moved from Home)
-        statusTv = TextView(act)
-        statusTv.textSize = 12f
-        statusTv.setPadding(dp(2), 0, 0, dp(10))
-        root.addView(statusTv)
         refreshStatus()
-
-        // PROTOCOL card (applies to presets and bare IP/hostname entries)
-        val protoCard = card()
-        protoCard.addView(cardLabel(getString(R.string.upstream_protocol)))
-        val protoGroup = RadioGroup(act)
-        protoGroup.orientation = RadioGroup.HORIZONTAL
-        val rDot = radio("DoT", p.getProtocol() == 1)
-        val rDoh = radio("DoH", p.getProtocol() == 2)
-        protoGroup.addView(rDot); protoGroup.addView(rDoh)
-        protoGroup.setOnCheckedChangeListener { _, checkedId ->
-            if (building) return@setOnCheckedChangeListener
-            prefs().setProtocol(if (checkedId == rDoh.id) 2 else 1)
-            applyChange()
-            rebuild()
-        }
-        protoCard.addView(protoGroup)
-        val protoHint = TextView(act)
-        protoHint.text = getString(R.string.protocol_hint)
-        protoHint.setTextColor(0xFF6E7794.toInt())
-        protoHint.textSize = 11f
-        protoHint.setPadding(0, dp(4), 0, 0)
-        protoCard.addView(protoHint)
-        root.addView(protoCard)
 
         // Catalog
         sectionLabel(getString(R.string.up_add_provider))
@@ -219,6 +195,23 @@ class UpstreamFragment : Fragment() {
         for (s in specs) {
             val id = ProviderCatalog.identify(s, p.getProtocol())
             if (id.known) inList.add(id.providerName)
+        }
+        // Saved customs (history) always sit ON TOP: above the 8 built-in
+        // providers and above the Custom input card. Customs already active
+        // today must survive being removed tomorrow, so seed them on first
+        // sight (idempotent: rememberCustom dedupes). Rendered only when NOT
+        // active: an active custom already shows in the active card above,
+        // and removing it from active makes it reappear here for one-tap
+        // re-adding. Tapping a history card opens the edit dialog.
+        for (s in specs) {
+            val id = ProviderCatalog.identify(s, p.getProtocol())
+            if (!id.known) rememberCustom(s)
+        }
+        val activeKeys = specs.map { ProviderCatalog.endpointKey(it, p) }.toSet()
+        for (h in prefs().customUpstreamHistory()) {
+            if (specs.contains(h)) continue
+            if (activeKeys.contains(ProviderCatalog.endpointKey(h, p))) continue
+            root.addView(historyCard(h))
         }
         for ((i, provider) in ProviderCatalog.providers.withIndex()) {
             root.addView(providerCard(i, provider, inList.contains(provider.name)))
@@ -248,7 +241,8 @@ class UpstreamFragment : Fragment() {
         val nameRow = LinearLayout(act)
         nameRow.orientation = LinearLayout.HORIZONTAL
         val name = TextView(act)
-        name.text = if (id.known) id.providerName else getString(R.string.up_custom_name)
+        name.text = if (id.known) id.providerName
+            else (p.customUpstreamName(spec) ?: getString(R.string.up_custom_name))
         name.setTextColor(0xFFE8EAF0.toInt())
         name.textSize = 15f
         name.setTypeface(name.typeface, android.graphics.Typeface.BOLD)
@@ -376,49 +370,244 @@ class UpstreamFragment : Fragment() {
         trait.textSize = 12.5f
         left.addView(trait)
         top.addView(left)
-        val b = Button(act)
-        b.setText(R.string.add)
-        b.setOnClickListener { showCustomDialog() }
-        top.addView(b)
         c.addView(top)
+        // No ADD button: tapping the card itself opens the name+address dialog.
         c.setOnClickListener { showCustomDialog() }
         return c
     }
 
-    private fun showCustomDialog() {
+    /** Remember a custom upstream in history (dedupe: exact + same endpoint).
+     *  Only explicit DoT/DoH customs are remembered (same rule as the dialog).
+     *  History is independent of the active list: removing from active does
+     *  NOT remove from history. No rebuild here (callers rebuild). */
+    private fun rememberCustom(spec: String) {
+        val raw = spec.trim()
+        if (raw.isEmpty()) return
+        val low = raw.lowercase()
+        if (!low.startsWith("tls://") && !low.startsWith("https://")) return
+        val p = prefs()
+        val hist = p.customUpstreamHistory().toMutableList()
+        if (hist.contains(raw)) return
+        val key = ProviderCatalog.endpointKey(raw, p)
+        if (hist.any { ProviderCatalog.endpointKey(it, p) == key }) return
+        hist.add(raw)
+        p.setCustomUpstreamHistory(hist)
+    }
+
+    /** Add a spec to the ACTIVE list (shared by the custom dialog and history
+     *  cards). Returns true if added. Guards: max 5, exact + endpoint dupe
+     *  (U5: a different spelling of an already-active server is a dupe too).
+     *  Does NOT touch history (callers remember separately). */
+    private fun addUpstreamSpec(spec: String): Boolean {
+        val act = activity ?: return false
+        val specs = prefs().upstreamList().toMutableList()
+        if (specs.size >= Prefs.MAX_UPSTREAMS) {
+            Toast.makeText(act, getString(R.string.max_upstreams_fmt, Prefs.MAX_UPSTREAMS),
+                Toast.LENGTH_SHORT).show()
+            return false
+        }
+        if (specs.contains(spec)) {
+            Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
+            return false
+        }
+        val newKey = ProviderCatalog.endpointKey(spec, prefs())
+        if (specs.any { ProviderCatalog.endpointKey(it, prefs()) == newKey }) {
+            Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
+            return false
+        }
+        specs.add(spec)
+        prefs().setUpstreamList(specs)
+        rebuild()
+        applyChange()
+        return true
+    }
+
+    /** A saved custom upstream, shown above the providers: name (or
+     *  "Custom" when unnamed) + address + DoT/DoH chip, Tambah (re-add to
+     *  active, no retyping) and ✕ (forget from history only; never touches
+     *  the active list or the stored name). Tapping the card itself opens
+     *  the edit dialog (prefilled name + address). */
+    private fun historyCard(spec: String): View {
+        val act = activity!!
+        val c = card()
+        val top = LinearLayout(act)
+        top.orientation = LinearLayout.HORIZONTAL
+        val left = LinearLayout(act)
+        left.orientation = LinearLayout.VERTICAL
+        left.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        val nameRow = LinearLayout(act)
+        nameRow.orientation = LinearLayout.HORIZONTAL
+        val name = TextView(act)
+        name.text = prefs().customUpstreamName(spec) ?: getString(R.string.up_custom_name)
+        name.setTextColor(0xFFE8EAF0.toInt())
+        name.textSize = 16f
+        name.setTypeface(name.typeface, android.graphics.Typeface.BOLD)
+        nameRow.addView(name)
+        val id = ProviderCatalog.identify(spec, prefs().getProtocol())
+        val ch = chip(ProviderCatalog.chipText(id), true)
+        val chLp = ch.layoutParams as LinearLayout.LayoutParams
+        chLp.marginStart = dp(8)
+        ch.layoutParams = chLp
+        nameRow.addView(ch)
+        left.addView(nameRow)
+        val addr = TextView(act)
+        addr.text = ProviderCatalog.addressLine(spec)
+        addr.setTextColor(0xFF8B93A7.toInt())
+        addr.textSize = 11.5f
+        addr.typeface = android.graphics.Typeface.MONOSPACE
+        left.addView(addr)
+        top.addView(left)
+        val b = Button(act)
+        b.setText(R.string.add)
+        b.setOnClickListener { addUpstreamSpec(spec) }
+        top.addView(b)
+        val del = Button(act)
+        del.text = "✕"
+        del.setOnClickListener {
+            val p = prefs()
+            val key = ProviderCatalog.endpointKey(spec, p)
+            val hist = p.customUpstreamHistory().filter {
+                it != spec && ProviderCatalog.endpointKey(it, p) != key
+            }
+            p.setCustomUpstreamHistory(hist)
+            rebuild()
+        }
+        top.addView(del)
+        c.addView(top)
+        // Tapping the card (not the buttons) opens the edit dialog.
+        c.setOnClickListener { showEditCustomDialog(spec) }
+        return c
+    }
+
+    /** Edit a saved custom: the same name+address dialog as adding, prefilled
+     *  with the current values. Saving updates the history entry in place
+     *  (order kept) and moves/updates its name. The new address must not
+     *  duplicate another history entry or an active upstream. History-only:
+     *  never touches the active list, never restarts the VPN. */
+    private fun showEditCustomDialog(oldSpec: String) {
         val act = activity ?: return
+        val p = prefs()
+        val layout = LinearLayout(act)
+        layout.orientation = LinearLayout.VERTICAL
+        val pad = dp(16)
+        layout.setPadding(pad, dp(8), pad, 0)
+        val nameEt = EditText(act)
+        nameEt.hint = "Name (optional)"
+        nameEt.setSingleLine(true)
+        nameEt.setText(p.customUpstreamName(oldSpec) ?: "")
+        val nameLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        nameLp.bottomMargin = dp(8)
+        nameEt.layoutParams = nameLp
+        layout.addView(nameEt)
         val et = EditText(act)
         et.hint = "tls://dns.example.com or https://dns.example.com/dns-query"
         et.setSingleLine(true)
+        et.setText(oldSpec)
+        et.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        layout.addView(et)
         AlertDialog.Builder(act)
             .setTitle(R.string.custom_ellipsis)
-            .setView(et)
-            .setPositiveButton(R.string.add) { _, _ ->
+            .setView(layout)
+            .setPositiveButton(R.string.save) { _, _ ->
                 val raw = et.text.toString().trim()
+                val low = raw.lowercase()
+                if (!low.startsWith("tls://") && !low.startsWith("https://")) {
+                    Toast.makeText(act, R.string.bad_format_upstream, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 if (!Prefs.parseCustomUpstream(raw).valid) {
                     Toast.makeText(act, R.string.bad_format_upstream, Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
-                val specs = prefs().upstreamList().toMutableList()
-                if (specs.size >= Prefs.MAX_UPSTREAMS) {
-                    Toast.makeText(act, getString(R.string.max_upstreams_fmt, Prefs.MAX_UPSTREAMS),
-                        Toast.LENGTH_SHORT).show()
+                val nm = nameEt.text.toString()
+                if (raw == oldSpec) {
+                    // Address unchanged: only the name may have changed.
+                    p.setCustomUpstreamName(oldSpec, nm)
+                    rebuild()
                     return@setPositiveButton
                 }
-                if (specs.contains(raw)) {
+                // Address changed: the new spec must not duplicate another
+                // history entry or an active upstream (exact or endpoint).
+                val active = p.upstreamList()
+                val activeKeys = active.map { ProviderCatalog.endpointKey(it, p) }.toSet()
+                val rawKey = ProviderCatalog.endpointKey(raw, p)
+                val hist = p.customUpstreamHistory()
+                if (active.contains(raw) || activeKeys.contains(rawKey)
+                    || hist.contains(raw)
+                    || hist.any { it != oldSpec && ProviderCatalog.endpointKey(it, p) == rawKey }) {
                     Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                // U5: a different spelling of an already-active server is a dupe too
-                val newKey = ProviderCatalog.endpointKey(raw, prefs())
-                if (specs.any { ProviderCatalog.endpointKey(it, prefs()) == newKey }) {
-                    Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                specs.add(raw)
-                prefs().setUpstreamList(specs)
+                // Replace in place (order kept) and move the name along.
+                val updated = hist.map { if (it == oldSpec) raw else it }
+                p.setCustomUpstreamHistory(updated)
+                p.setCustomUpstreamName(oldSpec, "")
+                if (nm.isNotBlank()) p.setCustomUpstreamName(raw, nm)
                 rebuild()
-                applyChange()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Custom input dialog: name first, then address. The name is optional
+     *  (blank = shows "Custom"); the address keeps the old explicit
+     *  DoT/DoH rule. Saving here adds the custom to the HISTORY list only
+     *  (never to the active list, never restarts the VPN); it joins the
+     *  active upstreams only when ADD is tapped on its history card. */
+    private fun showCustomDialog() {
+        val act = activity ?: return
+        val layout = LinearLayout(act)
+        layout.orientation = LinearLayout.VERTICAL
+        val pad = dp(16)
+        layout.setPadding(pad, dp(8), pad, 0)
+        val nameEt = EditText(act)
+        nameEt.hint = "Name (optional)"
+        nameEt.setSingleLine(true)
+        val nameLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        nameLp.bottomMargin = dp(8)
+        nameEt.layoutParams = nameLp
+        layout.addView(nameEt)
+        val et = EditText(act)
+        et.hint = "tls://dns.example.com or https://dns.example.com/dns-query"
+        et.setSingleLine(true)
+        et.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        layout.addView(et)
+        AlertDialog.Builder(act)
+            .setTitle(R.string.custom_ellipsis)
+            .setView(layout)
+            .setPositiveButton(R.string.add) { _, _ ->
+                val raw = et.text.toString().trim()
+                // Custom only supports explicit DoT/DoH (no bare IP/hostname).
+                val low = raw.lowercase()
+                if (!low.startsWith("tls://") && !low.startsWith("https://")) {
+                    Toast.makeText(act, R.string.bad_format_upstream, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (!Prefs.parseCustomUpstream(raw).valid) {
+                    Toast.makeText(act, R.string.bad_format_upstream, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                // List-only: a custom saved here enters the HISTORY list,
+                // never the active list. It joins the active upstreams only
+                // when ADD is tapped on its history card (addUpstreamSpec).
+                // So no max-5 check here (history caps at 20, not 5) and no
+                // VPN restart (the active config is untouched).
+                val p = prefs()
+                val hist = p.customUpstreamHistory()
+                val rawKey = ProviderCatalog.endpointKey(raw, p)
+                if (hist.contains(raw)
+                    || hist.any { ProviderCatalog.endpointKey(it, p) == rawKey }) {
+                    Toast.makeText(act, R.string.already_in_list, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                rememberCustom(raw)
+                val nm = nameEt.text.toString()
+                if (nm.isNotBlank()) p.setCustomUpstreamName(raw, nm)
+                rebuild()
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -426,12 +615,7 @@ class UpstreamFragment : Fragment() {
 
     private fun refreshStatus() {
         val act = activity ?: return
-        if (!::statusTv.isInitialized) return
         val running = (act as MainActivity).isVpnRunning()
-        val st = if (running) DnsVpnService.upstreamStatusLine else ""
-        statusTv.text = st
-        val down = st.contains("DOWN")
-        statusTv.setTextColor((if (down) 0xFFFBBF24 else 0xFF8B93A7).toInt())
         // per-provider ping values (green when the VPN is up and the upstream
         // has answered real queries; em dash otherwise)
         for ((spec, tv) in pingViews) {

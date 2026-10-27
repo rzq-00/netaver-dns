@@ -1,14 +1,23 @@
 package com.netaver.dns.ui
 
 import android.app.Fragment
+import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.TextWatcher
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
 import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.Switch
 import android.widget.TextView
@@ -16,6 +25,7 @@ import android.widget.TextView
 import com.netaver.dns.NetAverApp
 import com.netaver.dns.R
 import com.netaver.dns.log.Entries
+import com.netaver.dns.util.AppIcons
 import com.netaver.dns.util.FirewallManager
 
 import java.util.ArrayList
@@ -28,9 +38,19 @@ import java.util.Locale
 class AppsFragment : Fragment() {
     private lateinit var list: ListView
     private lateinit var empty: TextView
+    private lateinit var resultCount: TextView
     private lateinit var adapter: AppsAdapter
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var ticker: Runnable
+    private var sortMode = 1 // 0=A-Z, 1=most queries, 2=most blocked
+    private var query = ""
+    private lateinit var sortBtn: TextView
+    private lateinit var sortMenu: LinearLayout
+    private lateinit var ringAz: TextView
+    private lateinit var ringQueries: TextView
+    private lateinit var ringBlocked: TextView
+    private lateinit var searchBtn: ImageButton
+    private lateinit var searchBox: EditText
 
     /** Installed system packages (one row per UID), loaded once off-thread. */
     @Volatile
@@ -45,13 +65,39 @@ class AppsFragment : Fragment() {
         val v = inflater.inflate(R.layout.fragment_apps, container, false)
         list = v.findViewById(R.id.apps_list)
         empty = v.findViewById(R.id.apps_empty)
+        resultCount = v.findViewById(R.id.apps_result_count)
+        sortBtn = v.findViewById(R.id.apps_sort_btn)
+        sortMenu = v.findViewById(R.id.apps_sort_menu)
+        ringAz = v.findViewById(R.id.apps_sort_ring_az)
+        ringQueries = v.findViewById(R.id.apps_sort_ring_queries)
+        ringBlocked = v.findViewById(R.id.apps_sort_ring_blocked)
+        searchBtn = v.findViewById(R.id.apps_search_btn)
+        searchBox = v.findViewById(R.id.apps_search_box)
         val app = activity!!.application as NetAverApp
+        sortMode = app.prefs().appSort()
         val showSystemBox: CheckBox = v.findViewById(R.id.apps_show_system)
         showSystemBox.isChecked = app.prefs().showSystemApps()
         showSystemBox.setOnCheckedChangeListener { _, on ->
             app.prefs().setShowSystemApps(on)
             refreshNow()
         }
+        searchBtn.setColorFilter(resolveThemeColor(android.R.attr.colorAccent))
+        searchBtn.setOnClickListener { toggleSearch() }
+        searchBox.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                query = s?.toString() ?: ""
+                refreshNow()
+            }
+        })
+        sortBtn.setOnClickListener {
+            sortMenu.visibility = if (sortMenu.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        v.findViewById<View>(R.id.apps_sort_row_az).setOnClickListener { setSort(0) }
+        v.findViewById<View>(R.id.apps_sort_row_queries).setOnClickListener { setSort(1) }
+        v.findViewById<View>(R.id.apps_sort_row_blocked).setOnClickListener { setSort(2) }
+        updateSortUi()
         adapter = AppsAdapter(app.firewall())
         list.adapter = adapter
         list.setOnItemClickListener { _, _, pos, _ ->
@@ -100,9 +146,79 @@ class AppsFragment : Fragment() {
             // "System" bucket); hidden unless the toggle is on.
             stats = allStats.filter { it.uid >= 10000 }
         }
-        adapter.setItems(stats)
-        empty.visibility = if (stats.isEmpty()) View.VISIBLE else View.GONE
-        list.visibility = if (stats.isEmpty()) View.GONE else View.VISIBLE
+        var shown = stats
+        if (query.isNotEmpty()) {
+            val q = query.lowercase()
+            shown = shown.filter { it.app.lowercase().contains(q) }
+        }
+        shown = when (sortMode) {
+            0 -> shown.sortedBy { it.app.lowercase() }
+            2 -> shown.sortedByDescending { it.blocked }
+            else -> shown.sortedByDescending { it.queries }
+        }
+        adapter.setItems(shown)
+        empty.visibility = if (shown.isEmpty()) View.VISIBLE else View.GONE
+        list.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
+        if (searchBox.visibility == View.VISIBLE) {
+            resultCount.visibility = View.VISIBLE
+            resultCount.text = if (shown.size == 1) getString(R.string.apps_found_one)
+                else getString(R.string.apps_found_fmt, shown.size)
+        } else {
+            resultCount.visibility = View.GONE
+        }
+    }
+
+    private fun sortLabel(mode: Int): String = when (mode) {
+        0 -> getString(R.string.sort_az)
+        2 -> getString(R.string.sort_most_blocked)
+        else -> getString(R.string.sort_most_queries)
+    }
+
+    private fun updateSortUi() {
+        sortBtn.text = getString(R.string.sort_button_fmt, sortLabel(sortMode))
+        val accent = resolveThemeColor(android.R.attr.colorAccent)
+        val muted = resolveThemeColor(android.R.attr.textColorSecondary)
+        ringAz.text = if (sortMode == 0) "◉" else "○"
+        ringAz.setTextColor(if (sortMode == 0) accent else muted)
+        ringQueries.text = if (sortMode == 1) "◉" else "○"
+        ringQueries.setTextColor(if (sortMode == 1) accent else muted)
+        ringBlocked.text = if (sortMode == 2) "◉" else "○"
+        ringBlocked.setTextColor(if (sortMode == 2) accent else muted)
+    }
+
+    private fun setSort(mode: Int) {
+        sortMode = mode
+        (activity?.application as? NetAverApp)?.prefs()?.setAppSort(mode)
+        updateSortUi()
+        sortMenu.visibility = View.GONE
+        refreshNow()
+    }
+
+    private fun toggleSearch() {
+        if (searchBox.visibility == View.VISIBLE) {
+            searchBox.setText("")
+            query = ""
+            searchBox.visibility = View.GONE
+            hideKeyboard()
+            refreshNow()
+        } else {
+            searchBox.visibility = View.VISIBLE
+            searchBox.requestFocus()
+            val imm = activity?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun hideKeyboard() {
+        val imm = activity?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(searchBox.windowToken, 0)
+    }
+
+    private fun resolveThemeColor(attr: Int): Int {
+        val tv = TypedValue()
+        val ok = activity?.theme?.resolveAttribute(attr, tv, true) ?: false
+        if (!ok) return 0xFF60A5FA.toInt()
+        return tv.data
     }
 
     /** Load installed system packages once (one row per UID; shared UIDs collapse). */
@@ -156,11 +272,14 @@ class AppsFragment : Fragment() {
             }
             val s = items[pos]
             val icon: TextView = row.findViewById(R.id.item_icon)
+            val iconImg: ImageView = row.findViewById(R.id.item_icon_img)
             val name: TextView = row.findViewById(R.id.item_name)
             val sub: TextView = row.findViewById(R.id.item_sub)
             val dot: TextView = row.findViewById(R.id.item_dot)
             val fwSwitch: Switch = row.findViewById(R.id.item_fw)
             icon.text = if (s.app.isEmpty()) "?" else s.app.substring(0, 1).uppercase()
+            // Real app icon (async + cached); the letter stays on any failure.
+            AppIcons.load(parent.context.packageManager, s.uid, iconImg, icon)
             name.text = s.app
             sub.text = if (s.installedOnly) parent.context.getString(R.string.app_no_activity_system)
                 else parent.context.getString(R.string.app_stats_fmt,

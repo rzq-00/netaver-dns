@@ -116,8 +116,13 @@ class IpPacket private constructor(
         fun buildTcp(out: ByteArray, srcIp: Int, dstIp: Int,
                      srcPort: Int, dstPort: Int,
                      seq: Long, ack: Long, flags: Int, window: Int,
-                     payload: ByteArray?, poff: Int, plen: Int): Int {
-            val total = 20 + 20 + plen
+                     payload: ByteArray?, poff: Int, plen: Int,
+                     mss: Int = 0): Int {
+            // vc102: optional MSS option (kind 2, len 4). Without it the
+            // client falls back to the 536-byte default MSS (RFC 879) and
+            // floods the proxy with ~3x as many small segments.
+            val tcpHdrLen = if (mss > 0) 24 else 20
+            val total = 20 + tcpHdrLen + plen
             out[0] = 0x45
             out[1] = 0
             putShort(out, 2, total)
@@ -132,14 +137,19 @@ class IpPacket private constructor(
             putShort(out, 22, dstPort)
             putInt(out, 24, seq.toInt())
             putInt(out, 28, ack.toInt())
-            out[32] = 0x50 // data offset 5
+            out[32] = if (mss > 0) 0x60 else 0x50 // data offset 6 / 5
             out[33] = flags.toByte()
             putShort(out, 34, window)
             putShort(out, 36, 0) // checksum later
             putShort(out, 38, 0)
-            if (plen > 0) System.arraycopy(payload, poff, out, 40, plen)
+            if (mss > 0) {
+                out[40] = 2 // MSS kind
+                out[41] = 4 // MSS length
+                putShort(out, 42, mss)
+            }
+            if (plen > 0) System.arraycopy(payload, poff, out, 20 + tcpHdrLen, plen)
             putShort(out, 10, ipChecksum(out, 0, 20))
-            putShort(out, 36, tcpChecksum(out, srcIp, dstIp, 20, 20 + plen))
+            putShort(out, 36, tcpChecksum(out, srcIp, dstIp, 20, tcpHdrLen + plen))
             return total
         }
 

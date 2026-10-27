@@ -179,6 +179,7 @@ class DnsVpnService : VpnService() {
 
     // auto-reconnect on network change
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastDefaultNetwork: Network? = null
     private val netEpoch = AtomicLong(0)
 
     // throttle for bypass-attempt logging: key -> last log time (avoid spam)
@@ -387,10 +388,17 @@ class DnsVpnService : VpnService() {
             }
 
             override fun onAvailable(network: Network) {
-                if (networkLost) {
+                // A default-network switch can deliver onAvailable(new)
+                // BEFORE onLost(old); reacting only when networkLost is
+                // already true skipped reconnect handling for that order.
+                // React whenever the default network object changes, as
+                // well as after a recorded loss.
+                val switched = lastDefaultNetwork != null && lastDefaultNetwork != network
+                if (networkLost || switched) {
                     networkLost = false
                     onNetworkReconnected()
                 }
+                lastDefaultNetwork = network
             }
         }
         try {
@@ -409,11 +417,14 @@ class DnsVpnService : VpnService() {
         }
     }
 
-    /** Log a connection start for debug capture (hangs become visible). */
-    fun debugConnStart(appLabel: String, proto: String, dest: String) {
+    /** Log a connection start for debug capture (hangs become visible).
+     *  vc100: the app label (PackageManager) is resolved ONLY while a
+     *  capture is actually running — never on the handshake path. */
+    fun debugConnStart(resolver: AppResolver, uid: Int, proto: String, dest: String) {
         try {
             val app = application as NetAverApp
-            app.debugCapture().connStart(appLabel, proto, dest)
+            val cap = app.debugCapture()
+            if (cap.isCapturing()) cap.connStart(resolver.labelForUid(uid), proto, dest)
         } catch (ignored: Exception) {
         }
     }
@@ -435,6 +446,14 @@ class DnsVpnService : VpnService() {
         upstreamFails.clear()
         upstreamDown.clear()
         closeAllConns()
+        // WiFi-switch stall fix: established TCP connections are bound to
+        // the dead network's local IP and blackhole (no error, client
+        // stays ESTABLISHED, so downloads look stuck, not disconnected).
+        // RST them so apps reconnect immediately via the new network.
+        // UDP sessions are dropped too (their 60 s idle cleanup is too
+        // slow for a switch).
+        tcpProxy?.resetAllForNetworkChange()
+        udpProxy?.resetAllSessions()
         updateUpstreamStatus()
     }
 

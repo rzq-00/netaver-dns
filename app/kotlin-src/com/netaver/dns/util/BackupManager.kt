@@ -29,6 +29,8 @@ object BackupManager {
         prefs.put("fallback_upstream", p.fallbackUpstream())
         prefs.put("upstream_list", p.upstreamList().joinToString(";"))
         prefs.put("upstream_mode", p.upstreamMode())
+        prefs.put("custom_upstream_history", p.customUpstreamHistory().joinToString(";"))
+        prefs.put("custom_upstream_names", p.customUpstreamNamesRaw())
         prefs.put("battery_saver", p.batterySaver())
         prefs.put("block_bypass", p.blockBypass())
         prefs.put("bypass_lan", p.bypassLan())
@@ -145,6 +147,26 @@ object BackupManager {
                     val list = raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }
                     if (list.isNotEmpty()) p.setUpstreamList(list)
                 }
+                // History + names travel with the backup. Same guard as
+                // upstream_list: an empty backup value never wipes the
+                // current data. History entries are filtered to the explicit
+                // DoT/DoH custom format, same rule as rememberCustom.
+                strs["custom_upstream_history"]?.let { raw ->
+                    val list = raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+                        .filter { val l = it.lowercase(); l.startsWith("tls://") || l.startsWith("https://") }
+                    if (list.isNotEmpty()) p.setCustomUpstreamHistory(list)
+                }
+                strs["custom_upstream_names"]?.let { raw ->
+                    val m = LinkedHashMap<String, String>()
+                    for (e in raw.split(";")) {
+                        val i = e.indexOf('\u0001')
+                        if (i > 0) {
+                            val n = e.substring(i + 1)
+                            if (n.isNotEmpty()) m[e.substring(0, i)] = n
+                        }
+                    }
+                    if (m.isNotEmpty()) p.setCustomUpstreamNames(m)
+                }
                 ints["upstream_mode"]?.let { p.setUpstreamMode(it) }
                 // legacy v1.x backup without upstream_list: rebuild the list from
                 // the imported legacy primary+fallback (migration won't re-run
@@ -259,6 +281,7 @@ object BackupManager {
 
     private val STR_KEYS = arrayOf(
         "custom_upstream", "fallback_upstream", "upstream_list",
+        "custom_upstream_history", "custom_upstream_names",
         "split_bypass", "app_language")
 
     private fun clamp(v: Int, lo: Int, hi: Int): Int = maxOf(lo, minOf(hi, v))
